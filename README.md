@@ -9,9 +9,9 @@ changed Smoke, Sparkles and Fire. It is a glowing cyan bubble around the charact
 - a thin inner ring that drifts in and out
 - a misty fill that's thicker at the bottom
 - only the sparkles from today's ForceField (the 2014 one had them too), without today's blue
-  sphere: faint, soft swirl streaks around the waist that fade in, spin and fade away like a
-  whirlpool, tiny glowing dots on it in white, peach, pink and pale blue, and little white
-  stars floating up out of the bubble
+  sphere: thin, faint rings packed close together around the waist like a whirlpool, whose arcs
+  fade in, spin and fade away, lots of tiny glints twinkling on it (mostly white, some peach
+  and orange), and a few small white stars floating up out of the bubble
 - a one-second fade-out when the ForceField ends, and the whole thing stays attached to the
   player while it fades
 - a cyan screen tint while your camera is inside a bubble (in the 2014 version the screen
@@ -65,12 +65,12 @@ The `CONFIG` table at the top of the script controls the look:
 - Everything hangs off one invisible, non-colliding, massless part that is **welded** to the
   character's root part. The engine moves it with the character, so nothing gets left behind
   when you jump or run, even during the fade-out.
-- The sparkles are rebuilt from particles and beams. The swirl is 20 curved streaks (beams)
-  that each fade in, swirl and fade out, then reappear somewhere else, like particles. Each
-  streak is three see-through beams of different widths stacked together, which blurs its
-  edges. The streaks and dots sit on a second part that spins on the first one; the stars stay
-  on the first part so they float straight up. All of them are locked to their part, so they
-  stay with the player and fade out with the bubble.
+- The sparkles are rebuilt from particles and beams. The swirl is 11 rings, each made of 3
+  thin curved beams (with a faint wider copy for a soft edge) that fade in, spin and fade out,
+  then come back at a new angle. The glints are short-lived particles on a flat disc. The swirl
+  and glints sit on a second part that spins on the first one; the stars stay on the first part
+  so they float straight up. All of them are locked to their part, so they stay with the player
+  and fade out with the bubble.
 - The rim is a camera-facing `BillboardGui`. Each glow in it (inner light, outer haze, inner
   ring, rim, core) is a stack of faint, nested round `UIStroke` rings whose opacities add up
   to a smooth falloff, which gives the blurry gradient look without any images. The script
