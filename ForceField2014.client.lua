@@ -3,9 +3,9 @@
 
 	Brings back the ROBLOX ForceField look from the October 2014 update (the
 	same update that changed Smoke, Sparkles and Fire): a glowing cyan bubble
-	with a bright rim, a softly pulsing inner ring, a swirly shell and a few
-	sparkles. When the camera goes inside a bubble the screen turns cyan, like
-	it did back then.
+	with a bright rim, a softly pulsing inner ring and a swirly shell, around
+	the same sparkle effect today's ForceField uses. When the camera goes
+	inside a bubble the screen turns cyan, like it did back then.
 
 	It replaces the look of every ForceField in the game: SpawnLocation spawn
 	protection, admin :ff commands, Instance.new("ForceField"), and so on.
@@ -31,8 +31,9 @@ local CONFIG = {
 	ShellColor = Color3.fromRGB(0, 170, 255),
 	ShellTransparency = 0.6,
 
-	ShowSparkles = true,
-	SparkleRate = 12,
+	-- The 2014 bubble had the same sparkles as today's ForceField, so Roblox's own
+	-- ForceField effect stays on inside it. Set to false for just the bubble.
+	ShowModernSparkles = true,
 
 	ShowInsideTint = true, -- tint the screen while the camera is inside a bubble
 	InsideTintTransparency = 0.6,
@@ -138,16 +139,6 @@ local function newCircle(parent: Instance, radius: number, zIndex: number): Fram
 	return frame
 end
 
-local function setDiameter(effect, diameter: number)
-	effect.diameter = diameter
-	local scale = diameter / CONFIG.FallbackDiameter
-	effect.sparkles.Size = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.1 * scale),
-		NumberSequenceKeypoint.new(0.3, 0.35 * scale),
-		NumberSequenceKeypoint.new(1, 0),
-	})
-end
-
 local function createEffect(forceField: ForceField, model: Model)
 	local shell = Instance.new("Part")
 	shell.Name = model.Name
@@ -161,25 +152,6 @@ local function createEffect(forceField: ForceField, model: Model)
 	shell.CanQuery = false
 	shell.CastShadow = false
 	shell.Locked = true
-
-	local sparkles = Instance.new("ParticleEmitter")
-	sparkles.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-	sparkles.Shape = Enum.ParticleEmitterShape.Sphere
-	sparkles.ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume
-	sparkles.ShapeInOut = Enum.ParticleEmitterShapeInOut.Outward
-	sparkles.Rate = CONFIG.SparkleRate
-	sparkles.Lifetime = NumberRange.new(0.6, 1.2)
-	sparkles.Speed = NumberRange.new(0.3, 1)
-	sparkles.Acceleration = Vector3.new(0, 1.5, 0)
-	sparkles.Rotation = NumberRange.new(0, 360)
-	sparkles.RotSpeed = NumberRange.new(-90, 90)
-	sparkles.Transparency = NumberSequence.new(0.3, 1)
-	sparkles.Color = ColorSequence.new(CONFIG.HighlightColor, CONFIG.RimColor)
-	sparkles.LightEmission = 1
-	sparkles.LightInfluence = 0
-	sparkles.LockedToPart = true
-	sparkles.Enabled = false
-	sparkles.Parent = shell
 
 	-- The rim is drawn on a camera-facing billboard, so it is always a perfect
 	-- circle, just like the 2014 bubble.
@@ -247,7 +219,6 @@ local function createEffect(forceField: ForceField, model: Model)
 		dying = false,
 		phase = math.random() * math.pi * 2,
 		shell = shell,
-		sparkles = sparkles,
 		billboard = billboard,
 		canvas = canvas,
 		fill = fill,
@@ -255,12 +226,11 @@ local function createEffect(forceField: ForceField, model: Model)
 		highlight = highlight,
 		connection = nil :: RBXScriptConnection?,
 	}
-	setDiameter(effect, CONFIG.FallbackDiameter)
 
 	-- Re-measure when body parts show up after the ForceField does.
 	effect.connection = model.ChildAdded:Connect(function(child)
 		if child:IsA("BasePart") and effect.root then
-			setDiameter(effect, measureDiameter(model, effect.root))
+			effect.diameter = measureDiameter(model, effect.root)
 		end
 	end)
 
@@ -283,7 +253,6 @@ local function stop(forceField: ForceField)
 	end
 	effects[forceField] = nil
 	effect.dying = true
-	effect.sparkles.Enabled = false
 	if effect.connection then
 		effect.connection:Disconnect()
 	end
@@ -302,7 +271,7 @@ local function refresh(forceField: ForceField)
 
 	-- A ForceField that is already invisible when we first see it is meant to
 	-- stay invisible, so only ones we hid ourselves get the 2014 look.
-	if forceField.Visible then
+	if forceField.Visible and not CONFIG.ShowModernSparkles then
 		hiddenByUs[forceField] = true
 		forceField.Visible = false
 	end
@@ -384,19 +353,21 @@ end
 -- Updates one bubble and returns how strongly it covers the camera (0 when
 -- the camera is outside it).
 local function updateEffect(effect, dt: number, now: number, camera: Camera, highlightRotation: number): number
+	local root = effect.root
 	if not effect.dying then
-		local root = effect.root
 		if not (root and root:IsDescendantOf(effect.model)) then
 			root = findRoot(effect.model)
 			effect.root = root
 			if root then
-				setDiameter(effect, measureDiameter(effect.model, root))
+				effect.diameter = measureDiameter(effect.model, root)
 			end
 		end
 		effect.visible = root ~= nil
-		if root then
-			effect.cframe = root.CFrame
-		end
+	end
+	-- Keep following the character while fading out too, so a jump doesn't
+	-- leave the bubble behind. If the character is gone it stays where it was.
+	if root and root:IsDescendantOf(effect.model) then
+		effect.cframe = root.CFrame
 	end
 
 	if effect.dying then
@@ -416,7 +387,6 @@ local function updateEffect(effect, dt: number, now: number, camera: Camera, hig
 	end
 	effect.shell.CFrame = effect.cframe
 	effect.shell.Transparency = if CONFIG.ShowShell then 1 - (1 - CONFIG.ShellTransparency) * alpha else 1
-	effect.sparkles.Enabled = CONFIG.ShowSparkles and effect.visible and not effect.dying
 
 	local distance = (camera.CFrame.Position - position).Magnitude
 	if distance <= radius or alpha <= 0 then
