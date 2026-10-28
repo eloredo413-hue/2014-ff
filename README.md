@@ -9,8 +9,9 @@ changed Smoke, Sparkles and Fire. It is a glowing cyan bubble around the charact
 - a thin inner ring that drifts in and out
 - a misty fill that's thicker at the bottom
 - only the sparkles from today's ForceField (the 2014 one had them too), without today's blue
-  sphere: a faint, smoky swirl of rings spinning around the waist like a whirlpool, soft
-  glowing dots on it in white, peach, pink and pale blue, and little white stars drifting up
+  sphere: faint, soft swirl streaks around the waist that fade in, spin and fade away like a
+  whirlpool, tiny glowing dots on it in white, peach, pink and pale blue, and little white
+  stars floating up out of the bubble
 - a one-second fade-out when the ForceField ends, and the whole thing stays attached to the
   player while it fades
 - a cyan screen tint while your camera is inside a bubble (in the 2014 version the screen
@@ -64,11 +65,12 @@ The `CONFIG` table at the top of the script controls the look:
 - Everything hangs off one invisible, non-colliding, massless part that is **welded** to the
   character's root part. The engine moves it with the character, so nothing gets left behind
   when you jump or run, even during the fade-out.
-- The sparkles are rebuilt from particles and beams on that part. The swirl is 8 rings of
-  curved streaks (beams), each with a wide, faint copy around it so it looks smoky. The dots
-  use Roblox's built-in smoke texture shrunk down, which makes soft round dots. The stars use
-  the built-in sparkle texture. The part spins, and the particles are locked to it, so they
-  swirl around the player and fade out with the bubble.
+- The sparkles are rebuilt from particles and beams. The swirl is 20 curved streaks (beams)
+  that each fade in, swirl and fade out, then reappear somewhere else, like particles. Each
+  streak is three see-through beams of different widths stacked together, which blurs its
+  edges. The streaks and dots sit on a second part that spins on the first one; the stars stay
+  on the first part so they float straight up. All of them are locked to their part, so they
+  stay with the player and fade out with the bubble.
 - The rim is a camera-facing `BillboardGui`. Each glow in it (inner light, outer haze, inner
   ring, rim, core) is a stack of faint, nested round `UIStroke` rings whose opacities add up
   to a smooth falloff, which gives the blurry gradient look without any images. The script

@@ -88,12 +88,12 @@ local FILL_OPACITY = 0.16
 -- The sparkles are laid out in studs for a 5 stud tall R6 character and
 -- scaled to fit the real bubble.
 local BASE_DIAMETER = 5 * CONFIG.DiameterScale
-local STAR_TEXTURE = "rbxasset://textures/particles/sparkles_main.dds"
-local DOT_TEXTURE = "rbxasset://textures/particles/smoke_main.dds" -- a soft round blob when tiny
--- Dots and stars come out of this flat box around the waist. The dots use a
--- disc as wide as the box, with the middle left empty since it's inside the body.
-local SPARKLE_BOX = Vector3.new(5.4, 1.6, 5.4)
+local SPARKLE_TEXTURE = "rbxasset://textures/particles/sparkles_main.dds"
+-- The dots come from a flat disc around the waist (the middle is left empty
+-- since it's inside the body). The stars float up out of a taller box.
+local DOT_BOX = Vector3.new(5.4, 1.6, 5.4)
 local DISC_HOLE = 0.32
+local STAR_BOX = Vector3.new(4.4, 3.2, 4.4)
 
 -- Dots change color as they age, so at any moment there's a mix of white,
 -- peach, pink and pale blue.
@@ -105,28 +105,25 @@ local DOT_COLORS = ColorSequence.new({
 })
 local STAR_COLORS = ColorSequence.new(Color3.new(1, 1, 1), Color3.fromRGB(215, 235, 255))
 -- Particle sizes over their lifetime: { time, size, random variation }.
-local DOT_SIZE = { { 0, 0 }, { 0.2, 0.26, 0.1 }, { 0.8, 0.2, 0.08 }, { 1, 0 } }
-local DUST_SIZE = { { 0, 0 }, { 0.2, 0.14, 0.04 }, { 1, 0 } }
-local STAR_SIZE = { { 0, 0 }, { 0.3, 0.42, 0.12 }, { 1, 0 } }
+local DOT_SIZE = { { 0, 0 }, { 0.2, 0.2, 0.06 }, { 0.8, 0.15, 0.04 }, { 1, 0 } }
+local DUST_SIZE = { { 0, 0 }, { 0.2, 0.1, 0.03 }, { 1, 0 } }
+local STAR_SIZE = { { 0, 0 }, { 0.3, 0.36, 0.1 }, { 1, 0 } }
 
--- The swirl: rings of faint streaks around the waist, sloping down a little
--- toward the outside like a whirlpool. Each streak is { start angle, length in
--- degrees, strength }.
-local SWIRL = {
-	{ radius = 0.95, height = 0, arcs = { { 38, 83, 0.96 }, { 158, 107, 0.71 }, { 278, 96, 0.51 } } },
-	{ radius = 1.2, height = -0.04, arcs = { { 48, 71, 0.84 }, { 168, 109, 0.72 }, { 288, 86, 0.63 } } },
-	{ radius = 1.45, height = -0.08, arcs = { { 11, 76, 0.61 }, { 131, 77, 0.71 }, { 251, 100, 0.84 } } },
-	{ radius = 1.7, height = -0.12, arcs = { { 10, 99, 0.82 }, { 130, 96, 0.74 }, { 250, 82, 0.64 } } },
-	{ radius = 1.95, height = -0.16, arcs = { { 100, 94, 0.97 }, { 220, 88, 0.6 }, { 340, 70, 0.77 } } },
-	{ radius = 2.2, height = -0.2, arcs = { { 29, 93, 0.67 }, { 149, 72, 0.58 }, { 269, 74, 0.68 } } },
-	{ radius = 2.45, height = -0.24, arcs = { { 8, 102, 0.84 }, { 128, 97, 0.94 }, { 248, 68, 0.9 } } },
-	{ radius = 2.7, height = -0.28, arcs = { { 23, 73, 0.94 }, { 143, 102, 0.91 }, { 263, 109, 0.7 } } },
+-- The swirl is made of faint streaks that each fade in, swirl around the waist
+-- and fade away, then come back somewhere else, like particles. They sit on a
+-- shallow whirlpool that dips toward the outside.
+local STREAKS = 20
+local STREAK_RADIUS = NumberRange.new(0.95, 2.7)
+local STREAK_SLOPE = -0.16 -- studs of drop per stud outward
+local STREAK_LENGTH = NumberRange.new(60, 120) -- degrees
+local STREAK_LIFETIME = NumberRange.new(1.2, 2.2) -- seconds
+-- Each streak is see-through beams of different widths stacked on top of each
+-- other, which gives it soft, blurry edges instead of a sharp line.
+local STREAK_LAYERS = {
+	{ width = 0.07, opacity = 0.18 },
+	{ width = 0.15, opacity = 0.11 },
+	{ width = 0.28, opacity = 0.06 },
 }
-local STREAK_WIDTH = 0.045
-local STREAK_OPACITY = 0.2
--- A wide, faint copy around each streak makes the swirl look smoky.
-local STREAK_HALO_WIDTH = 0.32
-local STREAK_HALO_OPACITY = 0.12
 
 local localPlayer = Players.LocalPlayer
 
@@ -228,6 +225,20 @@ local function sizeSequence(keys, scale: number): NumberSequence
 	return NumberSequence.new(keypoints)
 end
 
+-- An invisible part that only carries effects: no collisions, no weight.
+local function newCarrier(name: string): Part
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Transparency = 1
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
+	part.CastShadow = false
+	part.Massless = true
+	part.Locked = true
+	return part
+end
+
 local function newEmitter(parent: BasePart, texture: string, colors: ColorSequence): ParticleEmitter
 	local emitter = Instance.new("ParticleEmitter")
 	emitter.Texture = texture
@@ -248,32 +259,46 @@ local function arcPoint(radius: number, height: number, angle: number): CFrame
 	return CFrame.fromMatrix(position, tangent, Vector3.yAxis)
 end
 
+-- Moves a swirl streak to a new random spot and restarts its fade.
+local function respawnStreak(streak, scale: number, random: Random)
+	local radius = random:NextNumber(STREAK_RADIUS.Min, STREAK_RADIUS.Max)
+	local height = (radius - STREAK_RADIUS.Min) * STREAK_SLOPE
+	local start = random:NextNumber(0, math.pi * 2)
+	local sweep = math.rad(random:NextNumber(STREAK_LENGTH.Min, STREAK_LENGTH.Max))
+	streak.from.CFrame = arcPoint(radius * scale, height * scale, start)
+	streak.to.CFrame = arcPoint(radius * scale, height * scale, start + sweep)
+	-- Handle length that makes a Bezier curve follow a circle.
+	local handle = 4 / 3 * math.tan(sweep / 4) * radius * scale
+	for index, beam in streak.beams do
+		local width = STREAK_LAYERS[index].width * scale
+		beam.CurveSize0 = handle
+		beam.CurveSize1 = handle
+		beam.Width0 = width
+		beam.Width1 = width
+	end
+	streak.strength = random:NextNumber(0.5, 1)
+	streak.lifetime = random:NextNumber(STREAK_LIFETIME.Min, STREAK_LIFETIME.Max)
+	streak.age = 0
+end
+
 local function layoutSparkles(effect)
 	local scale = effect.diameter / BASE_DIAMETER
-	effect.anchor.Size = SPARKLE_BOX * scale
+	effect.scale = scale
+	effect.anchor.Size = STAR_BOX * scale
+	effect.spinner.Size = DOT_BOX * scale
 
-	for _, arc in effect.arcs do
-		local radius = arc.radius * scale
-		local start = math.rad(arc.start)
-		local sweep = math.rad(arc.length)
-		arc.from.CFrame = arcPoint(radius, arc.height * scale, start)
-		arc.to.CFrame = arcPoint(radius, arc.height * scale, start + sweep)
-		-- Handle length that makes a Bezier curve follow a circle.
-		local handle = 4 / 3 * math.tan(sweep / 4) * radius
-		for beam, width in { [arc.beam] = STREAK_WIDTH, [arc.halo] = STREAK_HALO_WIDTH } do
-			beam.CurveSize0 = handle
-			beam.CurveSize1 = handle
-			beam.Width0 = width * scale
-			beam.Width1 = width * scale
-		end
+	-- Start the streaks part-way through their fades so they don't all pulse together.
+	for _, streak in effect.streaks do
+		respawnStreak(streak, scale, effect.random)
+		streak.age = effect.random:NextNumber(0, streak.lifetime)
 	end
 
 	local particleScale = scale * CONFIG.SparkleSize
 	effect.dots.Size = sizeSequence(DOT_SIZE, particleScale)
 	effect.dust.Size = sizeSequence(DUST_SIZE, particleScale)
 	effect.stars.Size = sizeSequence(STAR_SIZE, particleScale)
-	effect.stars.Speed = NumberRange.new(0.6 * scale, 1.4 * scale)
-	effect.stars.Acceleration = Vector3.new(0, 0.4 * scale, 0)
+	effect.stars.Speed = NumberRange.new(1.2 * scale, 2.4 * scale)
+	effect.stars.Acceleration = Vector3.new(0, 0.6 * scale, 0)
 end
 
 local function setDiameter(effect, diameter: number)
@@ -301,80 +326,72 @@ end
 local function createEffect(forceField: ForceField, model: Model)
 	-- Invisible part that carries everything. It gets welded to the character,
 	-- so the bubble can't fall behind, even while it fades out.
-	local anchor = Instance.new("Part")
-	anchor.Name = model.Name
-	anchor.Transparency = 1
+	local anchor = newCarrier(model.Name)
 	anchor.Anchored = true
-	anchor.CanCollide = false
-	anchor.CanTouch = false
-	anchor.CanQuery = false
-	anchor.CastShadow = false
-	anchor.Massless = true
-	anchor.Locked = true
 
 	local weld = Instance.new("Weld")
 	weld.Part1 = anchor
 	weld.Parent = anchor
 
-	-- Soft glowing dots on the swirl.
-	local dots = newEmitter(anchor, DOT_TEXTURE, DOT_COLORS)
+	-- The swirl and its dots hang off a second part that spins on the anchor.
+	-- The stars stay on the anchor so they float straight up.
+	local spinner = newCarrier("Swirl")
+	spinner.Parent = anchor
+
+	local spin = Instance.new("Weld")
+	spin.Part0 = anchor
+	spin.Part1 = spinner
+	spin.Parent = spinner
+
+	-- Glowing dots on the swirl.
+	local dots = newEmitter(spinner, SPARKLE_TEXTURE, DOT_COLORS)
 	dots.Shape = Enum.ParticleEmitterShape.Disc
 	dots.ShapePartial = DISC_HOLE
-	dots.Rate = 55
-	dots.Lifetime = NumberRange.new(0.8, 1.6)
+	dots.Rate = 60
+	dots.Lifetime = NumberRange.new(0.6, 1.2)
 	dots.Speed = NumberRange.new(0)
 	dots.Rotation = NumberRange.new(0, 360)
-	dots.Transparency = NumberSequence.new(0.15, 0.5)
+	dots.Transparency = NumberSequence.new(0.1, 0.6)
 
 	-- A few fainter ones scattered above and below it.
-	local dust = newEmitter(anchor, DOT_TEXTURE, DOT_COLORS)
-	dust.Rate = 8
+	local dust = newEmitter(spinner, SPARKLE_TEXTURE, DOT_COLORS)
+	dust.Rate = 6
 	dust.Lifetime = NumberRange.new(0.8, 1.4)
 	dust.Speed = NumberRange.new(0)
 	dust.Rotation = NumberRange.new(0, 360)
-	dust.Transparency = NumberSequence.new(0.3, 0.7)
+	dust.Transparency = NumberSequence.new(0.3, 0.75)
 
-	-- Little four-pointed stars drifting up.
-	local stars = newEmitter(anchor, STAR_TEXTURE, STAR_COLORS)
-	stars.Rate = 4
+	-- Little four-pointed stars floating up and out of the bubble.
+	local stars = newEmitter(anchor, SPARKLE_TEXTURE, STAR_COLORS)
+	stars.Rate = 5
 	stars.Lifetime = NumberRange.new(1.2, 2)
+	stars.SpreadAngle = Vector2.new(15, 15)
 	stars.Transparency = NumberSequence.new(0.05, 0.3)
 
-	local arcs = {}
-	for _, ring in SWIRL do
-		for _, streak in ring.arcs do
-			local from = Instance.new("Attachment")
-			from.Parent = anchor
-			local to = Instance.new("Attachment")
-			to.Parent = anchor
+	local streaks = {}
+	for _ = 1, STREAKS do
+		local from = Instance.new("Attachment")
+		from.Parent = spinner
+		local to = Instance.new("Attachment")
+		to.Parent = spinner
 
+		local beams = {}
+		for _, layer in STREAK_LAYERS do
 			local beam = Instance.new("Beam")
 			beam.Attachment0 = from
 			beam.Attachment1 = to
 			beam.FaceCamera = true
 			beam.Segments = 16
 			beam.Color = ColorSequence.new(CONFIG.SwirlColor)
-			beam.Transparency = streakFade(STREAK_OPACITY * streak[3])
+			beam.Transparency = streakFade(layer.opacity)
 			beam.LightEmission = 1
 			beam.LightInfluence = 0
 			beam.LocalTransparencyModifier = 1
-			beam.Parent = anchor
-
-			local halo = beam:Clone()
-			halo.Transparency = streakFade(STREAK_HALO_OPACITY * streak[3])
-			halo.Parent = anchor
-
-			table.insert(arcs, {
-				radius = ring.radius,
-				height = ring.height,
-				start = streak[1],
-				length = streak[2],
-				from = from,
-				to = to,
-				beam = beam,
-				halo = halo,
-			})
+			beam.Parent = spinner
+			table.insert(beams, beam)
 		end
+
+		table.insert(streaks, { from = from, to = to, beams = beams, strength = 0, lifetime = 1, age = 0 })
 	end
 
 	-- The rim is drawn on a camera-facing billboard, so it is always a perfect
@@ -453,11 +470,15 @@ local function createEffect(forceField: ForceField, model: Model)
 		phase = math.random() * math.pi * 2,
 		anchor = anchor,
 		weld = weld,
+		spinner = spinner,
+		spin = spin,
+		streaks = streaks,
+		random = Random.new(),
+		scale = 1,
 		dots = dots,
 		dust = dust,
 		stars = stars,
 		emitters = { dots, dust, stars },
-		arcs = arcs,
 		billboard = billboard,
 		canvas = canvas,
 		fill = fill,
@@ -623,16 +644,24 @@ local function updateEffect(effect, dt: number, now: number, camera: Camera, hig
 
 	-- Spin the sparkles. Particles are locked to the spinning part, so they
 	-- swirl around the character and fade with it.
-	effect.weld.C0 = CFrame.Angles(0, effect.phase - now * CONFIG.SpinSpeed, 0)
+	effect.spin.C0 = CFrame.Angles(0, effect.phase - now * CONFIG.SpinSpeed, 0)
 	local sparkling = CONFIG.ShowSparkles and effect.visible and not effect.dying
 	local sparkleFade = if CONFIG.ShowSparkles then 1 - alpha else 1
 	for _, emitter in effect.emitters do
 		emitter.Enabled = sparkling
 		emitter.LocalTransparencyModifier = sparkleFade
 	end
-	for _, arc in effect.arcs do
-		arc.beam.LocalTransparencyModifier = sparkleFade
-		arc.halo.LocalTransparencyModifier = sparkleFade
+	-- Each swirl streak fades in and out over its lifetime, then moves somewhere new.
+	for _, streak in effect.streaks do
+		streak.age += dt
+		if streak.age >= streak.lifetime then
+			respawnStreak(streak, effect.scale, effect.random)
+		end
+		local fade = math.sin(math.pi * streak.age / streak.lifetime) ^ 2
+		local hidden = if CONFIG.ShowSparkles then 1 - fade * streak.strength * alpha else 1
+		for _, beam in streak.beams do
+			beam.LocalTransparencyModifier = hidden
+		end
 	end
 
 	local radius = effect.diameter / 2
