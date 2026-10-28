@@ -28,11 +28,12 @@ local CONFIG = {
 	HazeColor = Color3.fromRGB(0, 150, 255),
 	HighlightColor = Color3.fromRGB(225, 252, 255),
 
-	-- The sparkles from today's ForceField: glitter rings spinning around the
-	-- waist and little stars drifting up.
+	-- The sparkles from today's ForceField: a faint swirl of rings spinning
+	-- around the waist, soft glowing dots on it, and little stars drifting up.
 	ShowSparkles = true,
-	SparkleColor = Color3.fromRGB(230, 242, 255),
-	SpinSpeed = 2.2, -- radians per second
+	SwirlColor = Color3.fromRGB(255, 246, 232),
+	SparkleSize = 1, -- scales the dots and stars
+	SpinSpeed = 2, -- radians per second
 
 	ShowInsideTint = true, -- tint the screen while the camera is inside a bubble
 	InsideTintTransparency = 0.6,
@@ -87,33 +88,45 @@ local FILL_OPACITY = 0.16
 -- The sparkles are laid out in studs for a 5 stud tall R6 character and
 -- scaled to fit the real bubble.
 local BASE_DIAMETER = 5 * CONFIG.DiameterScale
-local SPARKLE_TEXTURE = "rbxasset://textures/particles/sparkles_main.dds"
-local SPARKLE_BOX = Vector3.new(4, 1.6, 4) -- glitter and stars come out of this box
+local STAR_TEXTURE = "rbxasset://textures/particles/sparkles_main.dds"
+local DOT_TEXTURE = "rbxasset://textures/particles/smoke_main.dds" -- a soft round blob when tiny
+-- Dots and stars come out of this flat box around the waist. The dots use a
+-- disc as wide as the box, with the middle left empty since it's inside the body.
+local SPARKLE_BOX = Vector3.new(5.4, 1.6, 5.4)
+local DISC_HOLE = 0.32
 
--- Swirl streaks: arcs of flat circles around the character (angles in degrees).
-local ARCS = {
-	{ radius = 2.1, height = -0.4, start = 0, length = 110 },
-	{ radius = 2.1, height = -0.4, start = 180, length = 110 },
-	{ radius = 2.5, height = -0.9, start = 60, length = 90 },
-	{ radius = 2.5, height = -0.9, start = 240, length = 90 },
-	{ radius = 1.8, height = 0.2, start = 120, length = 80 },
-	{ radius = 1.8, height = 0.2, start = 300, length = 80 },
+-- Dots change color as they age, so at any moment there's a mix of white,
+-- peach, pink and pale blue.
+local DOT_COLORS = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+	ColorSequenceKeypoint.new(0.35, Color3.fromRGB(255, 205, 170)),
+	ColorSequenceKeypoint.new(0.7, Color3.fromRGB(255, 190, 220)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(190, 220, 255)),
+})
+local STAR_COLORS = ColorSequence.new(Color3.new(1, 1, 1), Color3.fromRGB(215, 235, 255))
+-- Particle sizes over their lifetime: { time, size, random variation }.
+local DOT_SIZE = { { 0, 0 }, { 0.2, 0.26, 0.1 }, { 0.8, 0.2, 0.08 }, { 1, 0 } }
+local DUST_SIZE = { { 0, 0 }, { 0.2, 0.14, 0.04 }, { 1, 0 } }
+local STAR_SIZE = { { 0, 0 }, { 0.3, 0.42, 0.12 }, { 1, 0 } }
+
+-- The swirl: rings of faint streaks around the waist, sloping down a little
+-- toward the outside like a whirlpool. Each streak is { start angle, length in
+-- degrees, strength }.
+local SWIRL = {
+	{ radius = 0.95, height = 0, arcs = { { 38, 83, 0.96 }, { 158, 107, 0.71 }, { 278, 96, 0.51 } } },
+	{ radius = 1.2, height = -0.04, arcs = { { 48, 71, 0.84 }, { 168, 109, 0.72 }, { 288, 86, 0.63 } } },
+	{ radius = 1.45, height = -0.08, arcs = { { 11, 76, 0.61 }, { 131, 77, 0.71 }, { 251, 100, 0.84 } } },
+	{ radius = 1.7, height = -0.12, arcs = { { 10, 99, 0.82 }, { 130, 96, 0.74 }, { 250, 82, 0.64 } } },
+	{ radius = 1.95, height = -0.16, arcs = { { 100, 94, 0.97 }, { 220, 88, 0.6 }, { 340, 70, 0.77 } } },
+	{ radius = 2.2, height = -0.2, arcs = { { 29, 93, 0.67 }, { 149, 72, 0.58 }, { 269, 74, 0.68 } } },
+	{ radius = 2.45, height = -0.24, arcs = { { 8, 102, 0.84 }, { 128, 97, 0.94 }, { 248, 68, 0.9 } } },
+	{ radius = 2.7, height = -0.28, arcs = { { 23, 73, 0.94 }, { 143, 102, 0.91 }, { 263, 109, 0.7 } } },
 }
-local ARC_WIDTH = 0.06
-local ARC_FADE = NumberSequence.new({ -- faint tail, bright leading end
-	NumberSequenceKeypoint.new(0, 1),
-	NumberSequenceKeypoint.new(0.55, 0.65),
-	NumberSequenceKeypoint.new(0.9, 0.3),
-	NumberSequenceKeypoint.new(1, 0.8),
-})
--- A wide, faint copy of each streak around it softens its edges.
-local ARC_HALO_WIDTH = 0.24
-local ARC_HALO_FADE = NumberSequence.new({
-	NumberSequenceKeypoint.new(0, 1),
-	NumberSequenceKeypoint.new(0.55, 0.9),
-	NumberSequenceKeypoint.new(0.9, 0.78),
-	NumberSequenceKeypoint.new(1, 0.95),
-})
+local STREAK_WIDTH = 0.045
+local STREAK_OPACITY = 0.2
+-- A wide, faint copy around each streak makes the swirl look smoky.
+local STREAK_HALO_WIDTH = 0.32
+local STREAK_HALO_OPACITY = 0.12
 
 local localPlayer = Players.LocalPlayer
 
@@ -196,10 +209,29 @@ local function glowRings(glow)
 	return rings, opacity
 end
 
-local function newEmitter(parent: BasePart): ParticleEmitter
+-- A streak fades in from its tail, is brightest past the middle and fades out
+-- again at its head.
+local function streakFade(opacity: number): NumberSequence
+	return NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(0.3, 1 - opacity * 0.8),
+		NumberSequenceKeypoint.new(0.65, 1 - opacity),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+end
+
+local function sizeSequence(keys, scale: number): NumberSequence
+	local keypoints = {}
+	for _, key in keys do
+		table.insert(keypoints, NumberSequenceKeypoint.new(key[1], key[2] * scale, (key[3] or 0) * scale))
+	end
+	return NumberSequence.new(keypoints)
+end
+
+local function newEmitter(parent: BasePart, texture: string, colors: ColorSequence): ParticleEmitter
 	local emitter = Instance.new("ParticleEmitter")
-	emitter.Texture = SPARKLE_TEXTURE
-	emitter.Color = ColorSequence.new(CONFIG.SparkleColor, CONFIG.RimColor)
+	emitter.Texture = texture
+	emitter.Color = colors
 	emitter.LightEmission = 1
 	emitter.LightInfluence = 0
 	emitter.LockedToPart = true -- particles move with the player instead of trailing behind
@@ -221,15 +253,14 @@ local function layoutSparkles(effect)
 	effect.anchor.Size = SPARKLE_BOX * scale
 
 	for _, arc in effect.arcs do
-		local spec = arc.spec
-		local radius = spec.radius * scale
-		local start = math.rad(spec.start)
-		local sweep = math.rad(spec.length)
-		arc.from.CFrame = arcPoint(radius, spec.height * scale, start)
-		arc.to.CFrame = arcPoint(radius, spec.height * scale, start + sweep)
+		local radius = arc.radius * scale
+		local start = math.rad(arc.start)
+		local sweep = math.rad(arc.length)
+		arc.from.CFrame = arcPoint(radius, arc.height * scale, start)
+		arc.to.CFrame = arcPoint(radius, arc.height * scale, start + sweep)
 		-- Handle length that makes a Bezier curve follow a circle.
 		local handle = 4 / 3 * math.tan(sweep / 4) * radius
-		for beam, width in { [arc.beam] = ARC_WIDTH, [arc.halo] = ARC_HALO_WIDTH } do
+		for beam, width in { [arc.beam] = STREAK_WIDTH, [arc.halo] = STREAK_HALO_WIDTH } do
 			beam.CurveSize0 = handle
 			beam.CurveSize1 = handle
 			beam.Width0 = width * scale
@@ -237,18 +268,12 @@ local function layoutSparkles(effect)
 		end
 	end
 
-	effect.glitter.Size = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0),
-		NumberSequenceKeypoint.new(0.15, 0.14 * scale),
-		NumberSequenceKeypoint.new(1, 0),
-	})
-	effect.stars.Size = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0),
-		NumberSequenceKeypoint.new(0.3, 0.35 * scale),
-		NumberSequenceKeypoint.new(1, 0),
-	})
-	effect.stars.Speed = NumberRange.new(1 * scale, 2 * scale)
-	effect.stars.Acceleration = Vector3.new(0, 0.5 * scale, 0)
+	local particleScale = scale * CONFIG.SparkleSize
+	effect.dots.Size = sizeSequence(DOT_SIZE, particleScale)
+	effect.dust.Size = sizeSequence(DUST_SIZE, particleScale)
+	effect.stars.Size = sizeSequence(STAR_SIZE, particleScale)
+	effect.stars.Speed = NumberRange.new(0.6 * scale, 1.4 * scale)
+	effect.stars.Acceleration = Vector3.new(0, 0.4 * scale, 0)
 end
 
 local function setDiameter(effect, diameter: number)
@@ -291,42 +316,65 @@ local function createEffect(forceField: ForceField, model: Model)
 	weld.Part1 = anchor
 	weld.Parent = anchor
 
-	local glitter = newEmitter(anchor)
-	glitter.Rate = 40
-	glitter.Lifetime = NumberRange.new(0.6, 1.2)
-	glitter.Speed = NumberRange.new(0)
-	glitter.Rotation = NumberRange.new(0, 360)
-	glitter.Transparency = NumberSequence.new(0.15)
+	-- Soft glowing dots on the swirl.
+	local dots = newEmitter(anchor, DOT_TEXTURE, DOT_COLORS)
+	dots.Shape = Enum.ParticleEmitterShape.Disc
+	dots.ShapePartial = DISC_HOLE
+	dots.Rate = 55
+	dots.Lifetime = NumberRange.new(0.8, 1.6)
+	dots.Speed = NumberRange.new(0)
+	dots.Rotation = NumberRange.new(0, 360)
+	dots.Transparency = NumberSequence.new(0.15, 0.5)
 
-	local stars = newEmitter(anchor)
-	stars.Rate = 5
-	stars.Lifetime = NumberRange.new(1, 1.6)
-	stars.Transparency = NumberSequence.new(0.1, 0.5)
+	-- A few fainter ones scattered above and below it.
+	local dust = newEmitter(anchor, DOT_TEXTURE, DOT_COLORS)
+	dust.Rate = 8
+	dust.Lifetime = NumberRange.new(0.8, 1.4)
+	dust.Speed = NumberRange.new(0)
+	dust.Rotation = NumberRange.new(0, 360)
+	dust.Transparency = NumberSequence.new(0.3, 0.7)
+
+	-- Little four-pointed stars drifting up.
+	local stars = newEmitter(anchor, STAR_TEXTURE, STAR_COLORS)
+	stars.Rate = 4
+	stars.Lifetime = NumberRange.new(1.2, 2)
+	stars.Transparency = NumberSequence.new(0.05, 0.3)
 
 	local arcs = {}
-	for _, spec in ARCS do
-		local from = Instance.new("Attachment")
-		from.Parent = anchor
-		local to = Instance.new("Attachment")
-		to.Parent = anchor
+	for _, ring in SWIRL do
+		for _, streak in ring.arcs do
+			local from = Instance.new("Attachment")
+			from.Parent = anchor
+			local to = Instance.new("Attachment")
+			to.Parent = anchor
 
-		local beam = Instance.new("Beam")
-		beam.Attachment0 = from
-		beam.Attachment1 = to
-		beam.FaceCamera = true
-		beam.Segments = 16
-		beam.Color = ColorSequence.new(CONFIG.SparkleColor)
-		beam.Transparency = ARC_FADE
-		beam.LightEmission = 1
-		beam.LightInfluence = 0
-		beam.LocalTransparencyModifier = 1
-		beam.Parent = anchor
+			local beam = Instance.new("Beam")
+			beam.Attachment0 = from
+			beam.Attachment1 = to
+			beam.FaceCamera = true
+			beam.Segments = 16
+			beam.Color = ColorSequence.new(CONFIG.SwirlColor)
+			beam.Transparency = streakFade(STREAK_OPACITY * streak[3])
+			beam.LightEmission = 1
+			beam.LightInfluence = 0
+			beam.LocalTransparencyModifier = 1
+			beam.Parent = anchor
 
-		local halo = beam:Clone()
-		halo.Transparency = ARC_HALO_FADE
-		halo.Parent = anchor
+			local halo = beam:Clone()
+			halo.Transparency = streakFade(STREAK_HALO_OPACITY * streak[3])
+			halo.Parent = anchor
 
-		table.insert(arcs, { spec = spec, from = from, to = to, beam = beam, halo = halo })
+			table.insert(arcs, {
+				radius = ring.radius,
+				height = ring.height,
+				start = streak[1],
+				length = streak[2],
+				from = from,
+				to = to,
+				beam = beam,
+				halo = halo,
+			})
+		end
 	end
 
 	-- The rim is drawn on a camera-facing billboard, so it is always a perfect
@@ -405,8 +453,10 @@ local function createEffect(forceField: ForceField, model: Model)
 		phase = math.random() * math.pi * 2,
 		anchor = anchor,
 		weld = weld,
-		glitter = glitter,
+		dots = dots,
+		dust = dust,
 		stars = stars,
+		emitters = { dots, dust, stars },
 		arcs = arcs,
 		billboard = billboard,
 		canvas = canvas,
@@ -575,11 +625,11 @@ local function updateEffect(effect, dt: number, now: number, camera: Camera, hig
 	-- swirl around the character and fade with it.
 	effect.weld.C0 = CFrame.Angles(0, effect.phase - now * CONFIG.SpinSpeed, 0)
 	local sparkling = CONFIG.ShowSparkles and effect.visible and not effect.dying
-	effect.glitter.Enabled = sparkling
-	effect.stars.Enabled = sparkling
 	local sparkleFade = if CONFIG.ShowSparkles then 1 - alpha else 1
-	effect.glitter.LocalTransparencyModifier = sparkleFade
-	effect.stars.LocalTransparencyModifier = sparkleFade
+	for _, emitter in effect.emitters do
+		emitter.Enabled = sparkling
+		emitter.LocalTransparencyModifier = sparkleFade
+	end
 	for _, arc in effect.arcs do
 		arc.beam.LocalTransparencyModifier = sparkleFade
 		arc.halo.LocalTransparencyModifier = sparkleFade

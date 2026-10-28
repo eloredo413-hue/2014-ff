@@ -8,8 +8,9 @@ changed Smoke, Sparkles and Fire. It is a glowing cyan bubble around the charact
 - a brighter side on the rim that faces the sun
 - a thin inner ring that drifts in and out
 - a misty fill that's thicker at the bottom
-- only the sparkles from today's ForceField (the 2014 one had them too): glitter rings that spin
-  around the waist and little stars drifting up, without today's blue sphere
+- only the sparkles from today's ForceField (the 2014 one had them too), without today's blue
+  sphere: a faint, smoky swirl of rings spinning around the waist like a whirlpool, soft
+  glowing dots on it in white, peach, pink and pale blue, and little white stars drifting up
 - a one-second fade-out when the ForceField ends, and the whole thing stays attached to the
   player while it fades
 - a cyan screen tint while your camera is inside a bubble (in the 2014 version the screen
@@ -48,7 +49,9 @@ The `CONFIG` table at the top of the script controls the look:
 | --- | --- |
 | `DiameterScale` | Bubble size relative to the character's height (`1.45` matches the videos) |
 | `RimColor`, `GlowColor`, `HazeColor`, `HighlightColor` | Colors of the rim and its glow |
-| `ShowSparkles`, `SparkleColor`, `SpinSpeed` | The swirling sparkles inside the bubble |
+| `ShowSparkles` | The swirl, dots and stars inside the bubble |
+| `SwirlColor`, `SpinSpeed` | Color of the swirl rings and how fast everything spins |
+| `SparkleSize` | Makes the dots and stars bigger or smaller (`1` = normal) |
 | `ShowInsideTint`, `InsideTintTransparency` | Screen tint while the camera is inside a bubble |
 | `HighlightFollowsSun` | Brightest side of the rim faces the sun (off = always top right) |
 | `PulseSpeed` | How fast the inner ring moves |
@@ -61,15 +64,16 @@ The `CONFIG` table at the top of the script controls the look:
 - Everything hangs off one invisible, non-colliding, massless part that is **welded** to the
   character's root part. The engine moves it with the character, so nothing gets left behind
   when you jump or run, even during the fade-out.
-- The sparkles are rebuilt from particles and beams on that part: glitter dots, rising stars
-  and curved streaks. The part spins, and the particles are locked to it, so they swirl around
-  the player and fade out with the bubble.
+- The sparkles are rebuilt from particles and beams on that part. The swirl is 8 rings of
+  curved streaks (beams), each with a wide, faint copy around it so it looks smoky. The dots
+  use Roblox's built-in smoke texture shrunk down, which makes soft round dots. The stars use
+  the built-in sparkle texture. The part spins, and the particles are locked to it, so they
+  swirl around the player and fade out with the bubble.
 - The rim is a camera-facing `BillboardGui`. Each glow in it (inner light, outer haze, inner
   ring, rim, core) is a stack of faint, nested round `UIStroke` rings whose opacities add up
   to a smooth falloff, which gives the blurry gradient look without any images. The script
   resizes the billboard to line up with the sphere's outline, and re-scales the ring widths
   when the bubble's size on screen changes.
-- The swirl streaks are beams, each with a wider, fainter copy around it to soften the edges.
 - Only the client draws the effect, so the server does no extra work.
 
 ## Notes
