@@ -47,23 +47,37 @@ local CONFIG = {
 -- How far the billboard reaches, in bubble radii. Leaves room for the outer glow.
 local CANVAS = 1.25
 
--- Every ring is a UIStroke drawn just outside a circle. Radii are in bubble
--- radii (1 = the rim). They are listed back to front.
-local BANDS = {
-	-- inner glow, fading toward the middle
-	{ inner = 0.78, outer = 0.86, color = CONFIG.GlowColor, opacity = 0.06 },
-	{ inner = 0.86, outer = 0.91, color = CONFIG.GlowColor, opacity = 0.12 },
-	{ inner = 0.91, outer = 0.94, color = CONFIG.GlowColor, opacity = 0.22 },
-	{ inner = 0.94, outer = 0.96, color = CONFIG.GlowColor, opacity = 0.35 },
-	-- thin inner ring that drifts in and out
-	{ inner = 0.9, outer = 0.912, color = Color3.fromRGB(140, 225, 255), opacity = 0.55, pulse = true },
-	-- outer haze
-	{ inner = 1, outer = 1.09, color = CONFIG.HazeColor, opacity = 0.07 },
-	{ inner = 1, outer = 1.045, color = CONFIG.HazeColor, opacity = 0.18 },
-	{ inner = 1, outer = 1.018, color = CONFIG.RimColor, opacity = 0.4 },
-	-- the rim and its hot white core
-	{ inner = 0.96, outer = 1, color = Color3.new(1, 1, 1), opacity = 0.92, highlight = true },
-	{ inner = 0.974, outer = 0.988, color = CONFIG.HighlightColor, opacity = 0.7 },
+-- The rim is made of soft glows, listed back to front. Each glow is a stack of
+-- faint nested rings whose opacities add up to a smooth falloff, so it keeps
+-- the blurry look of the original even in HD. Distances are in bubble radii
+-- (1 = the rim); a glow fades out about two spreads from its center.
+local GLOWS = {
+	-- soft light inside the rim, fading toward the middle
+	{ center = 0.975, spreadIn = 0.11, spreadOut = 0, peak = 0.42, color = CONFIG.GlowColor, rings = 22 },
+	-- haze outside the rim
+	{ center = 0.98, spreadIn = 0, spreadOut = 0.07, peak = 0.4, color = CONFIG.HazeColor, rings = 18 },
+	-- the inner ring that drifts in and out
+	{
+		center = 0.9,
+		spreadIn = 0.018,
+		spreadOut = 0.018,
+		peak = 0.5,
+		color = Color3.fromRGB(140, 225, 255),
+		rings = 8,
+		pulse = true,
+	},
+	-- the rim
+	{ center = 0.98, spreadIn = 0.03, spreadOut = 0.022, peak = 0.88, color = CONFIG.RimColor, rings = 14 },
+	-- its white-hot core, brightest on the side facing the sun
+	{
+		center = 0.98,
+		spreadIn = 0.011,
+		spreadOut = 0.009,
+		peak = 0.7,
+		color = Color3.new(1, 1, 1),
+		rings = 8,
+		highlight = true,
+	},
 }
 
 local PULSE_SWING = 0.045 -- how far the pulsing ring moves, in bubble radii
@@ -91,6 +105,14 @@ local ARC_FADE = NumberSequence.new({ -- faint tail, bright leading end
 	NumberSequenceKeypoint.new(0.55, 0.65),
 	NumberSequenceKeypoint.new(0.9, 0.3),
 	NumberSequenceKeypoint.new(1, 0.8),
+})
+-- A wide, faint copy of each streak around it softens its edges.
+local ARC_HALO_WIDTH = 0.24
+local ARC_HALO_FADE = NumberSequence.new({
+	NumberSequenceKeypoint.new(0, 1),
+	NumberSequenceKeypoint.new(0.55, 0.9),
+	NumberSequenceKeypoint.new(0.9, 0.78),
+	NumberSequenceKeypoint.new(1, 0.95),
 })
 
 local localPlayer = Players.LocalPlayer
@@ -160,6 +182,20 @@ local function newCircle(parent: Instance, radius: number, zIndex: number): Fram
 	return frame
 end
 
+-- Splits a glow into nested rings of equal opacity, sized so that where they
+-- overlap the opacity follows a bell curve. Returns each ring's reach inside
+-- and outside the glow's center, and the opacity of a single ring.
+local function glowRings(glow)
+	local opacity = 1 - (1 - glow.peak) ^ (1 / glow.rings)
+	local rings = {}
+	for index = 1, glow.rings do
+		local stacked = 1 - (1 - opacity) ^ (index - 0.5)
+		local reach = math.sqrt(2 * math.log(glow.peak / stacked))
+		table.insert(rings, { inner = glow.spreadIn * reach, outer = glow.spreadOut * reach })
+	end
+	return rings, opacity
+end
+
 local function newEmitter(parent: BasePart): ParticleEmitter
 	local emitter = Instance.new("ParticleEmitter")
 	emitter.Texture = SPARKLE_TEXTURE
@@ -193,10 +229,12 @@ local function layoutSparkles(effect)
 		arc.to.CFrame = arcPoint(radius, spec.height * scale, start + sweep)
 		-- Handle length that makes a Bezier curve follow a circle.
 		local handle = 4 / 3 * math.tan(sweep / 4) * radius
-		arc.beam.CurveSize0 = handle
-		arc.beam.CurveSize1 = handle
-		arc.beam.Width0 = ARC_WIDTH * scale
-		arc.beam.Width1 = ARC_WIDTH * scale
+		for beam, width in { [arc.beam] = ARC_WIDTH, [arc.halo] = ARC_HALO_WIDTH } do
+			beam.CurveSize0 = handle
+			beam.CurveSize1 = handle
+			beam.Width0 = width * scale
+			beam.Width1 = width * scale
+		end
 	end
 
 	effect.glitter.Size = NumberSequence.new({
@@ -284,7 +322,11 @@ local function createEffect(forceField: ForceField, model: Model)
 		beam.LocalTransparencyModifier = 1
 		beam.Parent = anchor
 
-		table.insert(arcs, { spec = spec, from = from, to = to, beam = beam })
+		local halo = beam:Clone()
+		halo.Transparency = ARC_HALO_FADE
+		halo.Parent = anchor
+
+		table.insert(arcs, { spec = spec, from = from, to = to, beam = beam, halo = halo })
 	end
 
 	-- The rim is drawn on a camera-facing billboard, so it is always a perfect
@@ -313,32 +355,43 @@ local function createEffect(forceField: ForceField, model: Model)
 	fillGradient.Transparency = NumberSequence.new(0.88, 0)
 	fillGradient.Parent = fill
 
-	local bands = {}
-	local highlight
-	for index, spec in BANDS do
-		local frame = newCircle(canvas, spec.inner, index + 1)
-		local stroke = Instance.new("UIStroke")
-		stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-		stroke.Color = spec.color
-		stroke.Transparency = 1
-		stroke.Parent = frame
+	local rings = {}
+	local highlights = {}
+	for index, glow in GLOWS do
+		local reaches, opacity = glowRings(glow)
+		for _, reach in reaches do
+			local frame = newCircle(canvas, glow.center - reach.inner, index + 1)
+			local stroke = Instance.new("UIStroke")
+			stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+			stroke.Color = glow.color
+			stroke.Transparency = 1
+			stroke.Parent = frame
 
-		if spec.highlight then
-			highlight = Instance.new("UIGradient")
-			highlight.Color = ColorSequence.new({
-				ColorSequenceKeypoint.new(0, CONFIG.GlowColor),
-				ColorSequenceKeypoint.new(0.55, CONFIG.RimColor),
-				ColorSequenceKeypoint.new(1, CONFIG.HighlightColor),
+			if glow.highlight then
+				local gradient = Instance.new("UIGradient")
+				gradient.Color = ColorSequence.new({
+					ColorSequenceKeypoint.new(0, CONFIG.GlowColor),
+					ColorSequenceKeypoint.new(0.55, CONFIG.RimColor),
+					ColorSequenceKeypoint.new(1, CONFIG.HighlightColor),
+				})
+				gradient.Transparency = NumberSequence.new({
+					NumberSequenceKeypoint.new(0, 0.3),
+					NumberSequenceKeypoint.new(0.55, 0.1),
+					NumberSequenceKeypoint.new(1, 0),
+				})
+				gradient.Parent = stroke
+				table.insert(highlights, gradient)
+			end
+
+			table.insert(rings, {
+				glow = glow,
+				inner = reach.inner,
+				outer = reach.outer,
+				opacity = opacity,
+				frame = frame,
+				stroke = stroke,
 			})
-			highlight.Transparency = NumberSequence.new({
-				NumberSequenceKeypoint.new(0, 0.3),
-				NumberSequenceKeypoint.new(0.55, 0.1),
-				NumberSequenceKeypoint.new(1, 0),
-			})
-			highlight.Parent = stroke
 		end
-
-		table.insert(bands, { spec = spec, frame = frame, stroke = stroke })
 	end
 
 	local effect = {
@@ -358,8 +411,10 @@ local function createEffect(forceField: ForceField, model: Model)
 		billboard = billboard,
 		canvas = canvas,
 		fill = fill,
-		bands = bands,
-		highlight = highlight,
+		rings = rings,
+		highlights = highlights,
+		pixelsPerRadius = 0, -- on-screen size the ring widths were last set for
+		drawnAlpha = -1, -- fade level the ring transparencies were last set for
 		connection = nil :: RBXScriptConnection?,
 	}
 	layoutSparkles(effect)
@@ -527,6 +582,7 @@ local function updateEffect(effect, dt: number, now: number, camera: Camera, hig
 	effect.stars.LocalTransparencyModifier = sparkleFade
 	for _, arc in effect.arcs do
 		arc.beam.LocalTransparencyModifier = sparkleFade
+		arc.halo.LocalTransparencyModifier = sparkleFade
 	end
 
 	local radius = effect.diameter / 2
@@ -549,21 +605,36 @@ local function updateEffect(effect, dt: number, now: number, camera: Camera, hig
 	if pixels <= 0 then
 		pixels = projectedPixels(camera, position, studs)
 	end
+	-- There are a lot of rings, so widths are only redone when the on-screen
+	-- size changes by more than 1%, and transparencies only while fading.
 	local pixelsPerRadius = pixels / (2 * CANVAS)
+	local resize = math.abs(pixelsPerRadius - effect.pixelsPerRadius) > effect.pixelsPerRadius * 0.01
+	if resize then
+		effect.pixelsPerRadius = pixelsPerRadius
+	end
+	local refade = alpha ~= effect.drawnAlpha
+	effect.drawnAlpha = alpha
 	local pulse = math.sin(now * CONFIG.PulseSpeed + effect.phase)
 	local shimmer = 0.95 + 0.05 * math.sin(now * 6 + effect.phase)
 
 	effect.fill.BackgroundTransparency = 1 - FILL_OPACITY * alpha
-	for _, band in effect.bands do
-		local spec = band.spec
-		if spec.pulse then
-			local ringRadius = spec.inner + PULSE_SWING * pulse
-			band.frame.Size = UDim2.fromScale(ringRadius / CANVAS, ringRadius / CANVAS)
+	for _, ring in effect.rings do
+		local glow = ring.glow
+		if glow.pulse then
+			local radius = glow.center + PULSE_SWING * pulse - ring.inner
+			ring.frame.Size = UDim2.fromScale(radius / CANVAS, radius / CANVAS)
 		end
-		band.stroke.Thickness = (spec.outer - spec.inner) * pixelsPerRadius
-		band.stroke.Transparency = 1 - spec.opacity * alpha * shimmer
+		if resize then
+			ring.stroke.Thickness = (ring.inner + ring.outer) * pixelsPerRadius
+		end
+		if refade or glow.highlight then
+			local strength = if glow.highlight then alpha * shimmer else alpha
+			ring.stroke.Transparency = 1 - ring.opacity * strength
+		end
 	end
-	effect.highlight.Rotation = highlightRotation
+	for _, gradient in effect.highlights do
+		gradient.Rotation = highlightRotation
+	end
 
 	return 0
 end

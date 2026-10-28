@@ -3,7 +3,8 @@
 A recreation of the ROBLOX ForceField look from the **October 2014** update, the same update that
 changed Smoke, Sparkles and Fire. It is a glowing cyan bubble around the character with:
 
-- a bright rim that is always a perfect circle, with a white-hot core and a soft outer haze
+- a bright rim that is always a perfect circle, with a white-hot core and a soft outer haze,
+  all drawn as smooth, blurry glows like the original, so it stays soft even in HD
 - a brighter side on the rim that faces the sun
 - a thin inner ring that drifts in and out
 - a misty fill that's thicker at the bottom
@@ -63,9 +64,12 @@ The `CONFIG` table at the top of the script controls the look:
 - The sparkles are rebuilt from particles and beams on that part: glitter dots, rising stars
   and curved streaks. The part spins, and the particles are locked to it, so they swirl around
   the player and fade out with the bubble.
-- The rim is a camera-facing `BillboardGui` made of round `UIStroke` rings. Every frame the
-  script resizes it so it lines up with the sphere's outline, and scales the stroke widths
-  to match how big the bubble looks on screen.
+- The rim is a camera-facing `BillboardGui`. Each glow in it (inner light, outer haze, inner
+  ring, rim, core) is a stack of faint, nested round `UIStroke` rings whose opacities add up
+  to a smooth falloff, which gives the blurry gradient look without any images. The script
+  resizes the billboard to line up with the sphere's outline, and re-scales the ring widths
+  when the bubble's size on screen changes.
+- The swirl streaks are beams, each with a wider, fainter copy around it to soften the edges.
 - Only the client draws the effect, so the server does no extra work.
 
 ## Notes
