@@ -3,13 +3,14 @@
 
 	Brings back the ROBLOX ForceField look from the October 2014 update (the
 	same update that changed Smoke, Sparkles and Fire): a glowing cyan bubble
-	with a bright rim, a softly pulsing inner ring and a swirly shell, around
-	the same sparkle effect today's ForceField uses. When the camera goes
-	inside a bubble the screen turns cyan, like it did back then.
+	with a bright rim and a softly pulsing inner ring, filled with the swirling
+	sparkles that today's ForceField still uses. When the camera goes inside a
+	bubble the screen turns cyan, like it did back then.
 
 	It replaces the look of every ForceField in the game: SpawnLocation spawn
 	protection, admin :ff commands, Instance.new("ForceField"), and so on.
-	Nothing has to be uploaded; everything is built from a part and UI objects.
+	Nothing has to be uploaded; everything is built from parts, beams,
+	particles and UI objects.
 
 	Setup: put this LocalScript in StarterPlayer > StarterPlayerScripts.
 ]]
@@ -27,13 +28,11 @@ local CONFIG = {
 	HazeColor = Color3.fromRGB(0, 150, 255),
 	HighlightColor = Color3.fromRGB(225, 252, 255),
 
-	ShowShell = true, -- swirly 3D shell inside the rim
-	ShellColor = Color3.fromRGB(0, 170, 255),
-	ShellTransparency = 0.6,
-
-	-- The 2014 bubble had the same sparkles as today's ForceField, so Roblox's own
-	-- ForceField effect stays on inside it. Set to false for just the bubble.
-	ShowModernSparkles = true,
+	-- The sparkles from today's ForceField: glitter rings spinning around the
+	-- waist and little stars drifting up.
+	ShowSparkles = true,
+	SparkleColor = Color3.fromRGB(230, 242, 255),
+	SpinSpeed = 2.2, -- radians per second
 
 	ShowInsideTint = true, -- tint the screen while the camera is inside a bubble
 	InsideTintTransparency = 0.6,
@@ -41,8 +40,8 @@ local CONFIG = {
 	HighlightFollowsSun = true, -- brightest side of the rim faces the sun
 	PulseSpeed = 2.6, -- how fast the inner ring breathes in and out
 
-	FadeInTime = 0.2,
-	FadeOutTime = 0.35,
+	FadeInTime = 0.25,
+	FadeOutTime = 1,
 }
 
 -- How far the billboard reaches, in bubble radii. Leaves room for the outer glow.
@@ -70,7 +69,29 @@ local BANDS = {
 local PULSE_SWING = 0.045 -- how far the pulsing ring moves, in bubble radii
 local FILL_RADIUS = 0.96
 local FILL_OPACITY = 0.16
-local DEATH_GROWTH = 0.15 -- the bubble swells this much while fading out
+
+-- The sparkles are laid out in studs for a 5 stud tall R6 character and
+-- scaled to fit the real bubble.
+local BASE_DIAMETER = 5 * CONFIG.DiameterScale
+local SPARKLE_TEXTURE = "rbxasset://textures/particles/sparkles_main.dds"
+local SPARKLE_BOX = Vector3.new(4, 1.6, 4) -- glitter and stars come out of this box
+
+-- Swirl streaks: arcs of flat circles around the character (angles in degrees).
+local ARCS = {
+	{ radius = 2.1, height = -0.4, start = 0, length = 110 },
+	{ radius = 2.1, height = -0.4, start = 180, length = 110 },
+	{ radius = 2.5, height = -0.9, start = 60, length = 90 },
+	{ radius = 2.5, height = -0.9, start = 240, length = 90 },
+	{ radius = 1.8, height = 0.2, start = 120, length = 80 },
+	{ radius = 1.8, height = 0.2, start = 300, length = 80 },
+}
+local ARC_WIDTH = 0.06
+local ARC_FADE = NumberSequence.new({ -- faint tail, bright leading end
+	NumberSequenceKeypoint.new(0, 1),
+	NumberSequenceKeypoint.new(0.55, 0.65),
+	NumberSequenceKeypoint.new(0.9, 0.3),
+	NumberSequenceKeypoint.new(1, 0.8),
+})
 
 local localPlayer = Players.LocalPlayer
 
@@ -139,19 +160,132 @@ local function newCircle(parent: Instance, radius: number, zIndex: number): Fram
 	return frame
 end
 
+local function newEmitter(parent: BasePart): ParticleEmitter
+	local emitter = Instance.new("ParticleEmitter")
+	emitter.Texture = SPARKLE_TEXTURE
+	emitter.Color = ColorSequence.new(CONFIG.SparkleColor, CONFIG.RimColor)
+	emitter.LightEmission = 1
+	emitter.LightInfluence = 0
+	emitter.LockedToPart = true -- particles move with the player instead of trailing behind
+	emitter.Enabled = false
+	emitter.Parent = parent
+	return emitter
+end
+
+-- A point on a flat circle around the character, with its X axis pointing
+-- along the circle so a Beam between two of them curves the right way.
+local function arcPoint(radius: number, height: number, angle: number): CFrame
+	local position = Vector3.new(radius * math.cos(angle), height, radius * math.sin(angle))
+	local tangent = Vector3.new(-math.sin(angle), 0, math.cos(angle))
+	return CFrame.fromMatrix(position, tangent, Vector3.yAxis)
+end
+
+local function layoutSparkles(effect)
+	local scale = effect.diameter / BASE_DIAMETER
+	effect.anchor.Size = SPARKLE_BOX * scale
+
+	for _, arc in effect.arcs do
+		local spec = arc.spec
+		local radius = spec.radius * scale
+		local start = math.rad(spec.start)
+		local sweep = math.rad(spec.length)
+		arc.from.CFrame = arcPoint(radius, spec.height * scale, start)
+		arc.to.CFrame = arcPoint(radius, spec.height * scale, start + sweep)
+		-- Handle length that makes a Bezier curve follow a circle.
+		local handle = 4 / 3 * math.tan(sweep / 4) * radius
+		arc.beam.CurveSize0 = handle
+		arc.beam.CurveSize1 = handle
+		arc.beam.Width0 = ARC_WIDTH * scale
+		arc.beam.Width1 = ARC_WIDTH * scale
+	end
+
+	effect.glitter.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0),
+		NumberSequenceKeypoint.new(0.15, 0.14 * scale),
+		NumberSequenceKeypoint.new(1, 0),
+	})
+	effect.stars.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0),
+		NumberSequenceKeypoint.new(0.3, 0.35 * scale),
+		NumberSequenceKeypoint.new(1, 0),
+	})
+	effect.stars.Speed = NumberRange.new(1 * scale, 2 * scale)
+	effect.stars.Acceleration = Vector3.new(0, 0.5 * scale, 0)
+end
+
+local function setDiameter(effect, diameter: number)
+	if effect.diameter ~= diameter then
+		effect.diameter = diameter
+		layoutSparkles(effect)
+	end
+end
+
+-- Welds the bubble to a character part, or freezes it in place when there is
+-- nothing to hold on to. It is never anchored while welded, since that would
+-- anchor the character too.
+local function attach(effect, root: BasePart?)
+	effect.root = root
+	if root then
+		effect.anchor.CFrame = root.CFrame
+		effect.anchor.Anchored = false
+		effect.weld.Part0 = root
+	else
+		effect.weld.Part0 = nil
+		effect.anchor.Anchored = true
+	end
+end
+
 local function createEffect(forceField: ForceField, model: Model)
-	local shell = Instance.new("Part")
-	shell.Name = model.Name
-	shell.Shape = Enum.PartType.Ball
-	shell.Material = Enum.Material.ForceField
-	shell.Color = CONFIG.ShellColor
-	shell.Transparency = 1
-	shell.Anchored = true
-	shell.CanCollide = false
-	shell.CanTouch = false
-	shell.CanQuery = false
-	shell.CastShadow = false
-	shell.Locked = true
+	-- Invisible part that carries everything. It gets welded to the character,
+	-- so the bubble can't fall behind, even while it fades out.
+	local anchor = Instance.new("Part")
+	anchor.Name = model.Name
+	anchor.Transparency = 1
+	anchor.Anchored = true
+	anchor.CanCollide = false
+	anchor.CanTouch = false
+	anchor.CanQuery = false
+	anchor.CastShadow = false
+	anchor.Massless = true
+	anchor.Locked = true
+
+	local weld = Instance.new("Weld")
+	weld.Part1 = anchor
+	weld.Parent = anchor
+
+	local glitter = newEmitter(anchor)
+	glitter.Rate = 40
+	glitter.Lifetime = NumberRange.new(0.6, 1.2)
+	glitter.Speed = NumberRange.new(0)
+	glitter.Rotation = NumberRange.new(0, 360)
+	glitter.Transparency = NumberSequence.new(0.15)
+
+	local stars = newEmitter(anchor)
+	stars.Rate = 5
+	stars.Lifetime = NumberRange.new(1, 1.6)
+	stars.Transparency = NumberSequence.new(0.1, 0.5)
+
+	local arcs = {}
+	for _, spec in ARCS do
+		local from = Instance.new("Attachment")
+		from.Parent = anchor
+		local to = Instance.new("Attachment")
+		to.Parent = anchor
+
+		local beam = Instance.new("Beam")
+		beam.Attachment0 = from
+		beam.Attachment1 = to
+		beam.FaceCamera = true
+		beam.Segments = 16
+		beam.Color = ColorSequence.new(CONFIG.SparkleColor)
+		beam.Transparency = ARC_FADE
+		beam.LightEmission = 1
+		beam.LightInfluence = 0
+		beam.LocalTransparencyModifier = 1
+		beam.Parent = anchor
+
+		table.insert(arcs, { spec = spec, from = from, to = to, beam = beam })
+	end
 
 	-- The rim is drawn on a camera-facing billboard, so it is always a perfect
 	-- circle, just like the 2014 bubble.
@@ -163,7 +297,7 @@ local function createEffect(forceField: ForceField, model: Model)
 	billboard.ClipsDescendants = false
 	billboard.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	billboard.Size = UDim2.fromScale(1, 1)
-	billboard.Parent = shell
+	billboard.Parent = anchor
 
 	local canvas = Instance.new("Frame")
 	canvas.Name = "Canvas"
@@ -211,14 +345,16 @@ local function createEffect(forceField: ForceField, model: Model)
 		forceField = forceField,
 		model = model,
 		root = nil :: BasePart?,
-		cframe = CFrame.identity,
 		diameter = CONFIG.FallbackDiameter,
-		size = 0,
 		alpha = 0,
 		visible = false,
 		dying = false,
 		phase = math.random() * math.pi * 2,
-		shell = shell,
+		anchor = anchor,
+		weld = weld,
+		glitter = glitter,
+		stars = stars,
+		arcs = arcs,
 		billboard = billboard,
 		canvas = canvas,
 		fill = fill,
@@ -226,15 +362,16 @@ local function createEffect(forceField: ForceField, model: Model)
 		highlight = highlight,
 		connection = nil :: RBXScriptConnection?,
 	}
+	layoutSparkles(effect)
 
 	-- Re-measure when body parts show up after the ForceField does.
 	effect.connection = model.ChildAdded:Connect(function(child)
 		if child:IsA("BasePart") and effect.root then
-			effect.diameter = measureDiameter(model, effect.root)
+			setDiameter(effect, measureDiameter(model, effect.root))
 		end
 	end)
 
-	shell.Parent = folder
+	anchor.Parent = folder
 	return effect
 end
 
@@ -269,9 +406,10 @@ local function refresh(forceField: ForceField)
 		return
 	end
 
-	-- A ForceField that is already invisible when we first see it is meant to
-	-- stay invisible, so only ones we hid ourselves get the 2014 look.
-	if forceField.Visible and not CONFIG.ShowModernSparkles then
+	-- Hide Roblox's own ForceField look; the sparkles are rebuilt above. One
+	-- that is already invisible when we first see it is meant to stay invisible,
+	-- so only ones we hid ourselves get the 2014 look.
+	if forceField.Visible then
 		hiddenByUs[forceField] = true
 		forceField.Visible = false
 	end
@@ -354,20 +492,21 @@ end
 -- the camera is outside it).
 local function updateEffect(effect, dt: number, now: number, camera: Camera, highlightRotation: number): number
 	local root = effect.root
-	if not effect.dying then
-		if not (root and root:IsDescendantOf(effect.model)) then
-			root = findRoot(effect.model)
-			effect.root = root
-			if root then
-				effect.diameter = measureDiameter(effect.model, root)
-			end
-		end
-		effect.visible = root ~= nil
+	if root and not root:IsDescendantOf(effect.model) then
+		-- The part we were welded to is gone (respawn, streaming). Stay where we
+		-- are until there's a new one.
+		attach(effect, nil)
+		root = nil
 	end
-	-- Keep following the character while fading out too, so a jump doesn't
-	-- leave the bubble behind. If the character is gone it stays where it was.
-	if root and root:IsDescendantOf(effect.model) then
-		effect.cframe = root.CFrame
+	if not root and not effect.dying then
+		root = findRoot(effect.model)
+		if root then
+			attach(effect, root)
+			setDiameter(effect, measureDiameter(effect.model, root))
+		end
+	end
+	if not effect.dying then
+		effect.visible = root ~= nil
 	end
 
 	if effect.dying then
@@ -375,19 +514,23 @@ local function updateEffect(effect, dt: number, now: number, camera: Camera, hig
 	elseif effect.visible then
 		effect.alpha = math.min(effect.alpha + dt / CONFIG.FadeInTime, 1)
 	end
-
 	local alpha = if effect.visible then effect.alpha else 0
-	local growth = if effect.dying then 1 + (1 - effect.alpha) * DEATH_GROWTH else 1
-	local radius = effect.diameter / 2 * growth
-	local position = effect.cframe.Position
 
-	if effect.size ~= radius then
-		effect.size = radius
-		effect.shell.Size = Vector3.one * (radius * 2)
+	-- Spin the sparkles. Particles are locked to the spinning part, so they
+	-- swirl around the character and fade with it.
+	effect.weld.C0 = CFrame.Angles(0, effect.phase - now * CONFIG.SpinSpeed, 0)
+	local sparkling = CONFIG.ShowSparkles and effect.visible and not effect.dying
+	effect.glitter.Enabled = sparkling
+	effect.stars.Enabled = sparkling
+	local sparkleFade = if CONFIG.ShowSparkles then 1 - alpha else 1
+	effect.glitter.LocalTransparencyModifier = sparkleFade
+	effect.stars.LocalTransparencyModifier = sparkleFade
+	for _, arc in effect.arcs do
+		arc.beam.LocalTransparencyModifier = sparkleFade
 	end
-	effect.shell.CFrame = effect.cframe
-	effect.shell.Transparency = if CONFIG.ShowShell then 1 - (1 - CONFIG.ShellTransparency) * alpha else 1
 
+	local radius = effect.diameter / 2
+	local position = if root then root.Position else effect.anchor.Position
 	local distance = (camera.CFrame.Position - position).Magnitude
 	if distance <= radius or alpha <= 0 then
 		effect.canvas.Visible = false
@@ -446,7 +589,7 @@ local function onRenderStep(dt: number)
 		local effect = fading[index]
 		inside = math.max(inside, updateEffect(effect, dt, now, camera, highlightRotation))
 		if effect.alpha <= 0 then
-			effect.shell:Destroy()
+			effect.anchor:Destroy()
 			table.remove(fading, index)
 		end
 	end

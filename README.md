@@ -6,9 +6,11 @@ changed Smoke, Sparkles and Fire. It is a glowing cyan bubble around the charact
 - a bright rim that is always a perfect circle, with a white-hot core and a soft outer haze
 - a brighter side on the rim that faces the sun
 - a thin inner ring that drifts in and out
-- a misty fill that's thicker at the bottom, plus a swirly shell
-- the same sparkle effect today's ForceField uses (the 2014 one had it too), with the bubble
-  drawn around it
+- a misty fill that's thicker at the bottom
+- only the sparkles from today's ForceField (the 2014 one had them too): glitter rings that spin
+  around the waist and little stars drifting up, without today's blue sphere
+- a one-second fade-out when the ForceField ends, and the whole thing stays attached to the
+  player while it fades
 - a cyan screen tint while your camera is inside a bubble (in the 2014 version the screen
   turned blue-white when the camera was inside one)
 
@@ -45,8 +47,7 @@ The `CONFIG` table at the top of the script controls the look:
 | --- | --- |
 | `DiameterScale` | Bubble size relative to the character's height (`1.45` matches the videos) |
 | `RimColor`, `GlowColor`, `HazeColor`, `HighlightColor` | Colors of the rim and its glow |
-| `ShowShell`, `ShellTransparency` | The swirly 3D shell inside the rim |
-| `ShowModernSparkles` | Keeps Roblox's own ForceField sparkles inside the bubble (off = bubble only) |
+| `ShowSparkles`, `SparkleColor`, `SpinSpeed` | The swirling sparkles inside the bubble |
 | `ShowInsideTint`, `InsideTintTransparency` | Screen tint while the camera is inside a bubble |
 | `HighlightFollowsSun` | Brightest side of the rim faces the sun (off = always top right) |
 | `PulseSpeed` | How fast the inner ring moves |
@@ -54,20 +55,23 @@ The `CONFIG` table at the top of the script controls the look:
 
 ## How it works
 
-- Roblox's own ForceField effect stays on and supplies the sparkles. With `ShowModernSparkles`
-  off, it's hidden by setting `ForceField.Visible = false` on each player's client, and the
-  ForceField still protects the character as normal.
+- Roblox's own ForceField look is hidden by setting `ForceField.Visible = false` on each
+  player's client. The ForceField still protects the character as normal.
+- Everything hangs off one invisible, non-colliding, massless part that is **welded** to the
+  character's root part. The engine moves it with the character, so nothing gets left behind
+  when you jump or run, even during the fade-out.
+- The sparkles are rebuilt from particles and beams on that part: glitter dots, rising stars
+  and curved streaks. The part spins, and the particles are locked to it, so they swirl around
+  the player and fade out with the bubble.
 - The rim is a camera-facing `BillboardGui` made of round `UIStroke` rings. Every frame the
   script resizes it so it lines up with the sphere's outline, and scales the stroke widths
   to match how big the bubble looks on screen.
-- The shell is a non-colliding Ball part with the `ForceField` material. It keeps following the
-  character while it fades out.
 - Only the client draws the effect, so the server does no extra work.
 
 ## Notes
 
-- An invisible ForceField (`Visible = false`) gets no bubble. With `ShowModernSparkles` on,
-  hiding a ForceField later also fades its bubble out. With it off, a ForceField the server
-  hides *after* the bubble has appeared keeps its bubble.
+- A ForceField that a game made invisible (`Visible = false`) before it showed up stays
+  invisible. But if the server hides a ForceField *after* the bubble has appeared, the
+  bubble won't notice.
 - This is a recreation built from video footage, not the original 2014 textures. The colors
   and sizes can all be changed in `CONFIG`.
