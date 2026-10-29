@@ -9,9 +9,8 @@ changed Smoke, Sparkles and Fire. It is a glowing cyan bubble around the charact
 - a thin inner ring that drifts in and out
 - a misty fill that's thicker at the bottom
 - only the sparkles from today's ForceField (the 2014 one had them too), without today's blue
-  sphere: thin, faint rings packed close together around the waist like a whirlpool, whose arcs
-  fade in, spin and fade away, lots of tiny glints twinkling on it (mostly white, some peach
-  and orange), and a few small white stars floating up out of the bubble
+  sphere: the glittery swirl spinning around the waist, using the ForceField's own swirl
+  flipbook, and a few small white stars floating up out of the bubble
 - a one-second fade-out when the ForceField ends, and the whole thing stays attached to the
   player while it fades
 - a cyan screen tint while your camera is inside a bubble (in the 2014 version the screen
@@ -28,10 +27,19 @@ It was rebuilt from these videos:
 1. In Roblox Studio, open **StarterPlayer > StarterPlayerScripts**.
 2. Insert a **LocalScript** and name it `ForceField2014`.
 3. Paste in everything from [`ForceField2014.client.lua`](ForceField2014.client.lua).
+4. Upload the swirl image, [`textures/ForceFieldSwirl.png`](textures/ForceFieldSwirl.png):
+   1. Open the **Asset Manager** (View tab), import the image, then right-click it and choose
+      **Copy ID to Clipboard**.
+   2. In the script's `CONFIG`, set `SwirlTexture` to that ID, like
+      `SwirlTexture = "rbxassetid://1234567890",`.
 
-That's it. You don't need to upload any decals or meshes. Every ForceField in the game gets the
-2014 look: SpawnLocation spawn protection, admin `:ff` commands, and anything a script makes
-with `Instance.new("ForceField")`.
+   Use the image's ID from the Asset Manager, not a decal ID from the website: a decal ID won't
+   load from a script. A new upload can take a few minutes to pass moderation before it shows
+   up. Until `SwirlTexture` is set, the bubble shows without the swirl and the script prints a
+   reminder in the Output window.
+
+Every ForceField in the game gets the 2014 look: SpawnLocation spawn protection, admin `:ff`
+commands, and anything a script makes with `Instance.new("ForceField")`.
 
 ## Trying it out
 
@@ -50,9 +58,11 @@ The `CONFIG` table at the top of the script controls the look:
 | --- | --- |
 | `DiameterScale` | Bubble size relative to the character's height (`1.45` matches the videos) |
 | `RimColor`, `GlowColor`, `HazeColor`, `HighlightColor` | Colors of the rim and its glow |
-| `ShowSparkles` | The swirl, dots and stars inside the bubble |
-| `SwirlColor`, `SpinSpeed` | Color of the swirl rings and how fast everything spins |
-| `SparkleSize` | Makes the dots and stars bigger or smaller (`1` = normal) |
+| `ShowSparkles` | The swirl and stars inside the bubble |
+| `SwirlTexture` | The uploaded swirl image's ID (see Setup) |
+| `SwirlColor` | Tints the swirl (white = the image's own colors) |
+| `SwirlFramerate` | How fast the swirl spins, in flipbook frames per second (16 frames = one full turn) |
+| `SparkleSize` | Makes the swirl and stars bigger or smaller (`1` = normal) |
 | `ShowInsideTint`, `InsideTintTransparency` | Screen tint while the camera is inside a bubble |
 | `HighlightFollowsSun` | Brightest side of the rim faces the sun (off = always top right) |
 | `PulseSpeed` | How fast the inner ring moves |
@@ -65,12 +75,12 @@ The `CONFIG` table at the top of the script controls the look:
 - Everything hangs off one invisible, non-colliding, massless part that is **welded** to the
   character's root part. The engine moves it with the character, so nothing gets left behind
   when you jump or run, even during the fade-out.
-- The sparkles are rebuilt from particles and beams. The swirl is 11 rings, each made of 3
-  thin curved beams (with a faint wider copy for a soft edge) that fade in, spin and fade out,
-  then come back at a new angle. The glints are short-lived particles on a flat disc. The swirl
-  and glints sit on a second part that spins on the first one; the stars stay on the first part
-  so they float straight up. All of them are locked to their part, so they stay with the player
-  and fade out with the bubble.
+- The swirl is a `ParticleEmitter` using a 4x4 flipbook: 16 frames of a glittery ring seen at
+  a slight angle, each turned 22.5° further than the last, so looping through them spins it.
+  The particles face the camera, sit just below the root part, and fade in and out with a
+  couple overlapping at a time so the swirl shimmers. The stars float up from a box around
+  the body. Both are locked to the welded part, so they stay with the player and fade out with
+  the bubble.
 - The rim is a camera-facing `BillboardGui`. Each glow in it (inner light, outer haze, inner
   ring, rim, core) is a stack of faint, nested round `UIStroke` rings whose opacities add up
   to a smooth falloff, which gives the blurry gradient look without any images. The script
@@ -83,5 +93,5 @@ The `CONFIG` table at the top of the script controls the look:
 - A ForceField that a game made invisible (`Visible = false`) before it showed up stays
   invisible. But if the server hides a ForceField *after* the bubble has appeared, the
   bubble won't notice.
-- This is a recreation built from video footage, not the original 2014 textures. The colors
+- The rim is a recreation built from video footage, not the original 2014 textures. The colors
   and sizes can all be changed in `CONFIG`.

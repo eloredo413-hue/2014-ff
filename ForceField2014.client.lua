@@ -28,12 +28,15 @@ local CONFIG = {
 	HazeColor = Color3.fromRGB(0, 150, 255),
 	HighlightColor = Color3.fromRGB(225, 252, 255),
 
-	-- The sparkles from today's ForceField: a faint swirl of rings spinning
-	-- around the waist, soft glowing dots on it, and little stars drifting up.
+	-- The sparkles from today's ForceField: a glittery swirl spinning around the
+	-- waist and little stars floating up. The swirl is the flipbook image in
+	-- textures/ForceFieldSwirl.png. Upload it to Roblox and paste its image ID
+	-- here, like "rbxassetid://1234567890" (see the README).
 	ShowSparkles = true,
-	SwirlColor = Color3.fromRGB(255, 246, 232),
-	SparkleSize = 1, -- scales the dots and stars
-	SpinSpeed = 2, -- radians per second
+	SwirlTexture = "",
+	SwirlColor = Color3.new(1, 1, 1), -- tints the swirl
+	SwirlFramerate = 30, -- flipbook frames per second; 16 frames make one full turn
+	SparkleSize = 1, -- scales the swirl and the stars
 
 	ShowInsideTint = true, -- tint the screen while the camera is inside a bubble
 	InsideTintTransparency = 0.6,
@@ -90,42 +93,30 @@ local FILL_OPACITY = 0.16
 local BASE_DIAMETER = 5 * CONFIG.DiameterScale
 local SPARKLE_TEXTURE = "rbxasset://textures/particles/sparkles_main.dds"
 
--- The swirl: thin, faint rings packed close together around the waist, like a
--- whirlpool. Each ring is a few arcs that fade in, spin and fade out, then come
--- back at a new angle. Arcs curl inward a little from tail to head.
-local SWIRL_HEIGHT = -0.25 -- below the center of the character's root part
-local SWIRL_RINGS = { 0.8, 1, 1.2, 1.4, 1.6, 1.8, 2, 2.2, 2.4, 2.6, 2.8 }
-local ARCS_PER_RING = 3
-local ARC_LENGTH = NumberRange.new(100, 150) -- degrees
-local ARC_CURL = -0.12 -- studs
-local ARC_LIFETIME = NumberRange.new(1.5, 3) -- seconds
--- Each arc is a thin line with a wider, fainter copy behind it for a soft edge.
-local ARC_LAYERS = {
-	{ width = 0.028, opacity = 0.2 },
-	{ width = 0.07, opacity = 0.07 },
-}
-
--- The dots: lots of tiny glints that twinkle on the swirl's disc for a split
--- second each, mostly white with some peach and orange. The middle of the disc
--- is left empty since it's inside the body.
-local DOT_DISC = 5.8 -- studs across
-local DISC_HOLE = 0.35
-local DOT_COLORS = ColorSequence.new({
-	ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
-	ColorSequenceKeypoint.new(0.45, Color3.fromRGB(255, 250, 240)),
-	ColorSequenceKeypoint.new(0.75, Color3.fromRGB(255, 205, 160)),
-	ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 170, 120)),
+-- The swirl is a 4x4 flipbook of a glittery ring seen from a slight angle, and
+-- each frame turns it a bit further. A couple of copies overlap at a time,
+-- fading in and out, so it shimmers.
+local SWIRL_HEIGHT = -0.25 -- studs below the center of the character's root part
+local SWIRL_SIZE = 1 -- particle width as a fraction of the bubble's diameter
+local SWIRL_FADE = NumberSequence.new({
+	NumberSequenceKeypoint.new(0, 1),
+	NumberSequenceKeypoint.new(0.25, 0.3),
+	NumberSequenceKeypoint.new(0.75, 0.3),
+	NumberSequenceKeypoint.new(1, 1),
 })
 
 -- The stars float up out of this box.
 local STAR_BOX = Vector3.new(4.4, 3.2, 4.4)
 local STAR_COLORS = ColorSequence.new(Color3.new(1, 1, 1), Color3.fromRGB(215, 235, 255))
 
--- Particle sizes over their lifetime: { time, size, random variation }.
-local DOT_SIZE = { { 0, 0 }, { 0.3, 0.13, 0.04 }, { 0.7, 0.1, 0.03 }, { 1, 0 } }
+-- Star size over its lifetime: { time, size, random variation }.
 local STAR_SIZE = { { 0, 0 }, { 0.3, 0.22, 0.06 }, { 1, 0 } }
 
 local localPlayer = Players.LocalPlayer
+
+if CONFIG.ShowSparkles and CONFIG.SwirlTexture == "" then
+	warn("ForceField2014: no swirl until CONFIG.SwirlTexture is set to the uploaded swirl image's ID (see the README)")
+end
 
 local folder = Instance.new("Folder")
 folder.Name = "ForceField2014"
@@ -206,17 +197,6 @@ local function glowRings(glow)
 	return rings, opacity
 end
 
--- An arc fades in from its tail, is brightest past the middle and fades out
--- again at its head.
-local function arcFade(opacity: number): NumberSequence
-	return NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 1),
-		NumberSequenceKeypoint.new(0.3, 1 - opacity * 0.8),
-		NumberSequenceKeypoint.new(0.65, 1 - opacity),
-		NumberSequenceKeypoint.new(1, 1),
-	})
-end
-
 local function sizeSequence(keys, scale: number): NumberSequence
 	local keypoints = {}
 	for _, key in keys do
@@ -239,7 +219,7 @@ local function newCarrier(name: string): Part
 	return part
 end
 
-local function newEmitter(parent: BasePart, texture: string, colors: ColorSequence): ParticleEmitter
+local function newEmitter(parent: Instance, texture: string, colors: ColorSequence): ParticleEmitter
 	local emitter = Instance.new("ParticleEmitter")
 	emitter.Texture = texture
 	emitter.Color = colors
@@ -251,49 +231,16 @@ local function newEmitter(parent: BasePart, texture: string, colors: ColorSequen
 	return emitter
 end
 
--- A point on a flat circle around the character, with its X axis pointing
--- along the circle so a Beam between two of them curves the right way.
-local function arcPoint(radius: number, height: number, angle: number): CFrame
-	local position = Vector3.new(radius * math.cos(angle), height, radius * math.sin(angle))
-	local tangent = Vector3.new(-math.sin(angle), 0, math.cos(angle))
-	return CFrame.fromMatrix(position, tangent, Vector3.yAxis)
-end
-
--- Puts a swirl arc at a new random angle on its ring and restarts its fade.
-local function respawnArc(arc, scale: number, random: Random)
-	local start = random:NextNumber(0, math.pi * 2)
-	local sweep = math.rad(random:NextNumber(ARC_LENGTH.Min, ARC_LENGTH.Max))
-	local headRadius = math.max(arc.radius + ARC_CURL, 0.3)
-	arc.from.CFrame = arcPoint(arc.radius * scale, 0, start)
-	arc.to.CFrame = arcPoint(headRadius * scale, 0, start + sweep)
-	-- Handle length that makes a Bezier curve follow a circle.
-	local handle = 4 / 3 * math.tan(sweep / 4) * (arc.radius + headRadius) / 2 * scale
-	for index, beam in arc.beams do
-		local width = ARC_LAYERS[index].width * scale
-		beam.CurveSize0 = handle
-		beam.CurveSize1 = handle
-		beam.Width0 = width
-		beam.Width1 = width
-	end
-	arc.strength = random:NextNumber(0.5, 1)
-	arc.lifetime = random:NextNumber(ARC_LIFETIME.Min, ARC_LIFETIME.Max)
-	arc.age = 0
-end
-
 local function layoutSparkles(effect)
 	local scale = effect.diameter / BASE_DIAMETER
-	effect.scale = scale
 	effect.anchor.Size = STAR_BOX * scale
-	effect.spinner.Size = Vector3.new(DOT_DISC, 0.2, DOT_DISC) * scale
 
-	-- Start the arcs part-way through their fades so they don't all pulse together.
-	for _, arc in effect.arcs do
-		respawnArc(arc, scale, effect.random)
-		arc.age = effect.random:NextNumber(0, arc.lifetime)
+	if effect.swirl then
+		effect.swirl.Parent.Position = Vector3.new(0, SWIRL_HEIGHT * scale, 0)
+		effect.swirl.Size = NumberSequence.new(effect.diameter * SWIRL_SIZE * CONFIG.SparkleSize)
 	end
 
 	local particleScale = scale * CONFIG.SparkleSize
-	effect.dots.Size = sizeSequence(DOT_SIZE, particleScale)
 	effect.stars.Size = sizeSequence(STAR_SIZE, particleScale)
 	effect.stars.Speed = NumberRange.new(1.2 * scale, 2.4 * scale)
 	effect.stars.Acceleration = Vector3.new(0, 0.6 * scale, 0)
@@ -331,26 +278,25 @@ local function createEffect(forceField: ForceField, model: Model)
 	weld.Part1 = anchor
 	weld.Parent = anchor
 
-	-- The swirl and its dots hang off a second part that spins on the anchor.
-	-- The stars stay on the anchor so they float straight up.
-	local spinner = newCarrier("Swirl")
-	spinner.Parent = anchor
+	-- The glittery swirl around the waist. It's camera-facing, since the ring is
+	-- already drawn at an angle in the image, and it turns by stepping through
+	-- the flipbook. It sits on an attachment so every copy starts at the center.
+	local swirl
+	if CONFIG.SwirlTexture ~= "" then
+		local center = Instance.new("Attachment")
+		center.Name = "Swirl"
+		center.Parent = anchor
 
-	local spin = Instance.new("Weld")
-	spin.Part0 = anchor
-	spin.Part1 = spinner
-	spin.Parent = spinner
-
-	-- Tiny glints twinkling on the swirl.
-	local dots = newEmitter(spinner, SPARKLE_TEXTURE, DOT_COLORS)
-	dots.Shape = Enum.ParticleEmitterShape.Disc
-	dots.ShapePartial = DISC_HOLE
-	dots.Rate = 200
-	dots.Lifetime = NumberRange.new(0.25, 0.6)
-	dots.Speed = NumberRange.new(0)
-	dots.Rotation = NumberRange.new(0, 360)
-	dots.Transparency = NumberSequence.new(0, 0.4)
-	dots.Brightness = 2
+		swirl = newEmitter(center, CONFIG.SwirlTexture, ColorSequence.new(CONFIG.SwirlColor))
+		swirl.FlipbookLayout = Enum.ParticleFlipbookLayout.Grid4x4
+		swirl.FlipbookMode = Enum.ParticleFlipbookMode.Loop
+		swirl.FlipbookFramerate = NumberRange.new(CONFIG.SwirlFramerate)
+		swirl.FlipbookStartRandom = true
+		swirl.Rate = 1.5
+		swirl.Lifetime = NumberRange.new(1.4)
+		swirl.Speed = NumberRange.new(0)
+		swirl.Transparency = SWIRL_FADE
+	end
 
 	-- Little four-pointed stars floating up and out of the bubble.
 	local stars = newEmitter(anchor, SPARKLE_TEXTURE, STAR_COLORS)
@@ -358,42 +304,6 @@ local function createEffect(forceField: ForceField, model: Model)
 	stars.Lifetime = NumberRange.new(1.2, 2)
 	stars.SpreadAngle = Vector2.new(15, 15)
 	stars.Transparency = NumberSequence.new(0.05, 0.3)
-
-	local arcs = {}
-	for _, radius in SWIRL_RINGS do
-		for _ = 1, ARCS_PER_RING do
-			local from = Instance.new("Attachment")
-			from.Parent = spinner
-			local to = Instance.new("Attachment")
-			to.Parent = spinner
-
-			local beams = {}
-			for _, layer in ARC_LAYERS do
-				local beam = Instance.new("Beam")
-				beam.Attachment0 = from
-				beam.Attachment1 = to
-				beam.FaceCamera = true
-				beam.Segments = 16
-				beam.Color = ColorSequence.new(CONFIG.SwirlColor)
-				beam.Transparency = arcFade(layer.opacity)
-				beam.LightEmission = 1
-				beam.LightInfluence = 0
-				beam.LocalTransparencyModifier = 1
-				beam.Parent = spinner
-				table.insert(beams, beam)
-			end
-
-			table.insert(arcs, {
-				radius = radius,
-				from = from,
-				to = to,
-				beams = beams,
-				strength = 0,
-				lifetime = 1,
-				age = 0,
-			})
-		end
-	end
 
 	-- The rim is drawn on a camera-facing billboard, so it is always a perfect
 	-- circle, just like the 2014 bubble.
@@ -471,14 +381,9 @@ local function createEffect(forceField: ForceField, model: Model)
 		phase = math.random() * math.pi * 2,
 		anchor = anchor,
 		weld = weld,
-		spinner = spinner,
-		spin = spin,
-		arcs = arcs,
-		random = Random.new(),
-		scale = 1,
-		dots = dots,
+		swirl = swirl,
 		stars = stars,
-		emitters = { dots, stars },
+		emitters = if swirl then { swirl, stars } else { stars },
 		billboard = billboard,
 		canvas = canvas,
 		fill = fill,
@@ -642,27 +547,13 @@ local function updateEffect(effect, dt: number, now: number, camera: Camera, hig
 	end
 	local alpha = if effect.visible then effect.alpha else 0
 
-	-- Spin the sparkles. Particles are locked to the spinning part, so they
-	-- swirl around the character and fade with it.
-	effect.spin.C0 = CFrame.new(0, SWIRL_HEIGHT * effect.scale, 0)
-		* CFrame.Angles(0, effect.phase - now * CONFIG.SpinSpeed, 0)
+	-- The particles are locked to the anchor, so they move with the character,
+	-- and fade out along with the bubble.
 	local sparkling = CONFIG.ShowSparkles and effect.visible and not effect.dying
 	local sparkleFade = if CONFIG.ShowSparkles then 1 - alpha else 1
 	for _, emitter in effect.emitters do
 		emitter.Enabled = sparkling
 		emitter.LocalTransparencyModifier = sparkleFade
-	end
-	-- Each swirl arc fades in and out over its lifetime, then moves to a new angle.
-	for _, arc in effect.arcs do
-		arc.age += dt
-		if arc.age >= arc.lifetime then
-			respawnArc(arc, effect.scale, effect.random)
-		end
-		local fade = math.sin(math.pi * arc.age / arc.lifetime) ^ 2
-		local hidden = if CONFIG.ShowSparkles then 1 - fade * arc.strength * alpha else 1
-		for _, beam in arc.beams do
-			beam.LocalTransparencyModifier = hidden
-		end
 	end
 
 	local radius = effect.diameter / 2
