@@ -27,19 +27,26 @@ It was rebuilt from these videos:
 1. In Roblox Studio, open **StarterPlayer > StarterPlayerScripts**.
 2. Insert a **LocalScript** and name it `ForceField2014`.
 3. Paste in everything from [`ForceField2014.client.lua`](ForceField2014.client.lua).
-4. Upload the swirl image, [`textures/ForceFieldSwirl.png`](textures/ForceFieldSwirl.png):
-   1. Open the **Asset Manager** (View tab), import the image, then right-click it and choose
-      **Copy ID to Clipboard**.
-   2. In the script's `CONFIG`, set `SwirlTexture` to that ID, like
-      `SwirlTexture = "rbxassetid://1234567890",`.
-
-   Use the image's ID from the Asset Manager, not a decal ID from the website: a decal ID won't
-   load from a script. A new upload can take a few minutes to pass moderation before it shows
-   up. Until `SwirlTexture` is set, the bubble shows without the swirl and the script prints a
-   reminder in the Output window.
-
-Every ForceField in the game gets the 2014 look: SpawnLocation spawn protection, admin `:ff`
+That's it: the swirl image is built into the script, so nothing has to be uploaded. Every ForceField in the game gets the 2014 look: SpawnLocation spawn protection, admin `:ff`
 commands, and anything a script makes with `Instance.new("ForceField")`.
+
+### Published games
+
+The script builds the swirl image with Roblox's `EditableImage`, which works in Studio right away.
+In a **published** game Roblox blocks it unless you turn on **Allow Mesh / Image APIs** in
+**Game Settings > Security**, and that needs your account to be 13+ and ID-verified. If you can't
+do that, upload the image instead:
+
+1. In Studio, open the **Asset Manager** (View tab), import
+   [`textures/ForceFieldSwirl.png`](textures/ForceFieldSwirl.png), then right-click it and choose
+   **Copy ID to Clipboard**.
+2. In the script's `CONFIG`, set `SwirlTexture` to that ID, like
+   `SwirlTexture = "rbxassetid://1234567890",`.
+
+Use the image's ID from the Asset Manager, not a decal ID from the website: a decal ID won't load
+from a script. A new upload can take a few minutes to pass moderation before it shows up. If the
+swirl can't be shown either way, the bubble still works without it and the script explains why in
+the Output window.
 
 ## Trying it out
 
@@ -59,7 +66,7 @@ The `CONFIG` table at the top of the script controls the look:
 | `DiameterScale` | Bubble size relative to the character's height (`1.45` matches the videos) |
 | `RimColor`, `GlowColor`, `HazeColor`, `HighlightColor` | Colors of the rim and its glow |
 | `ShowSparkles` | The swirl and stars inside the bubble |
-| `SwirlTexture` | The uploaded swirl image's ID (see Setup) |
+| `SwirlTexture` | Leave empty to use the built-in swirl, or set an uploaded image's ID (see Published games) |
 | `SwirlColor` | Tints the swirl (white = the image's own colors) |
 | `SwirlFramerate` | How fast the swirl spins, in flipbook frames per second (16 frames = one full turn) |
 | `SparkleSize` | Makes the swirl and stars bigger or smaller (`1` = normal) |
@@ -77,6 +84,9 @@ The `CONFIG` table at the top of the script controls the look:
   when you jump or run, even during the fade-out.
 - The swirl is a `ParticleEmitter` using a 4x4 flipbook: 16 frames of a glittery ring seen at
   a slight angle, each turned 22.5° further than the last, so looping through them spins it.
+  The image is stored in the script as compressed data (8 frames, since frames 9-16 nearly
+  repeat 1-8) and turned back into a 1024x1024 image with `EncodingService` and
+  `EditableImage` the first time a ForceField appears.
   The particles face the camera, sit just below the root part, and fade in and out with a
   couple overlapping at a time so the swirl shimmers. The stars float up from a box around
   the body. Both are locked to the welded part, so they stay with the player and fade out with
