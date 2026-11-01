@@ -9,8 +9,9 @@ changed Smoke, Sparkles and Fire. It is a glowing cyan bubble around the charact
 - a thin inner ring that drifts in and out
 - a misty fill that's thicker at the bottom
 - only the sparkles from today's ForceField (the 2014 one had them too), without today's blue
-  sphere: the glittery swirl spinning around the waist, using the ForceField's own swirl
-  flipbook, and a few small white stars floating up out of the bubble
+  sphere: the glittery swirl spinning around the waist, rebuilt from the ForceField's own swirl
+  image (same tilt, spin, glints and twinkle), and a few small white stars floating up out of
+  the bubble
 - a one-second fade-out when the ForceField ends, and the whole thing stays attached to the
   player while it fades
 - a cyan screen tint while your camera is inside a bubble (in the 2014 version the screen
@@ -27,15 +28,17 @@ It was rebuilt from these videos:
 1. In Roblox Studio, open **StarterPlayer > StarterPlayerScripts**.
 2. Insert a **LocalScript** and name it `ForceField2014`.
 3. Paste in everything from [`ForceField2014.client.lua`](ForceField2014.client.lua).
-That's it: the swirl image is built into the script, so nothing has to be uploaded. Every ForceField in the game gets the 2014 look: SpawnLocation spawn protection, admin `:ff`
-commands, and anything a script makes with `Instance.new("ForceField")`.
 
-### Published games
+That's it: nothing has to be uploaded, and it works in published games. Every ForceField in the
+game gets the 2014 look: SpawnLocation spawn protection, admin `:ff` commands, and anything a
+script makes with `Instance.new("ForceField")`. When the script starts it prints
+`ForceField2014 is running (rebuilt swirl)` in the Output window (on a phone, type `/console` in
+chat to see it), which is a quick way to check it's set up.
 
-The script builds the swirl image with Roblox's `EditableImage`, which works in Studio right away.
-In a **published** game Roblox blocks it unless you turn on **Allow Mesh / Image APIs** in
-**Game Settings > Security**, and that needs your account to be 13+ and ID-verified. If you can't
-do that, upload the image instead:
+### Optional: use the original swirl image
+
+The swirl is rebuilt from shapes, so it works anywhere, but it's not pixel-for-pixel. To show the
+original image instead, upload it:
 
 1. In Studio, open the **Asset Manager** (View tab), import
    [`textures/ForceFieldSwirl.png`](textures/ForceFieldSwirl.png), then right-click it and choose
@@ -44,9 +47,7 @@ do that, upload the image instead:
    `SwirlTexture = "rbxassetid://1234567890",`.
 
 Use the image's ID from the Asset Manager, not a decal ID from the website: a decal ID won't load
-from a script. A new upload can take a few minutes to pass moderation before it shows up. If the
-swirl can't be shown either way, the bubble still works without it and the script explains why in
-the Output window.
+from a script. A new upload can take a few minutes to pass moderation before it shows up.
 
 ## Trying it out
 
@@ -66,9 +67,9 @@ The `CONFIG` table at the top of the script controls the look:
 | `DiameterScale` | Bubble size relative to the character's height (`1.45` matches the videos) |
 | `RimColor`, `GlowColor`, `HazeColor`, `HighlightColor` | Colors of the rim and its glow |
 | `ShowSparkles` | The swirl and stars inside the bubble |
-| `SwirlTexture` | Leave empty to use the built-in swirl, or set an uploaded image's ID (see Published games) |
+| `SwirlTexture` | Leave empty for the rebuilt swirl, or set an uploaded image's ID (see Setup) |
 | `SwirlColor` | Tints the swirl (white = the image's own colors) |
-| `SwirlFramerate` | How fast the swirl spins, in flipbook frames per second (16 frames = one full turn) |
+| `SwirlFramerate` | How fast the swirl spins, in frames of the original image per second (16 frames = one full turn); `30` is a best guess |
 | `SparkleSize` | Makes the swirl and stars bigger or smaller (`1` = normal) |
 | `ShowInsideTint`, `InsideTintTransparency` | Screen tint while the camera is inside a bubble |
 | `HighlightFollowsSun` | Brightest side of the rim faces the sun (off = always top right) |
@@ -82,15 +83,19 @@ The `CONFIG` table at the top of the script controls the look:
 - Everything hangs off one invisible, non-colliding, massless part that is **welded** to the
   character's root part. The engine moves it with the character, so nothing gets left behind
   when you jump or run, even during the fade-out.
-- The swirl is a `ParticleEmitter` using a 4x4 flipbook: 16 frames of a glittery ring seen at
-  a slight angle, each turned 22.5° further than the last, so looping through them spins it.
-  The image is stored in the script as compressed data (8 frames, since frames 9-16 nearly
-  repeat 1-8) and turned back into a 1024x1024 image with `EncodingService` and
-  `EditableImage` the first time a ForceField appears.
-  The particles face the camera, sit just below the root part, and fade in and out with a
-  couple overlapping at a time so the swirl shimmers. The stars float up from a box around
-  the body. Both are locked to the welded part, so they stay with the player and fade out with
-  the bubble.
+- The swirl comes from the ForceField's swirl image, a 4x4 flipbook. Measuring it showed it's one
+  glittery disc seen from a slight angle (squashed to 48% of its width and tilted 4.5°) that
+  turns 22.5° per frame. The script rebuilds that disc on a part that always leans toward the
+  camera at that same angle and spins:
+  - the rings and spiral arms are 38 arcs and 2 soft glow rings traced from the image, drawn on
+    a `SurfaceGui` as round `UIStroke`s with `UIGradient` masks;
+  - the 46 glints sit where the image has them, are stretched so they look round once the disc
+    leans away, and copy each glint's brightness from all 16 frames, so they twinkle like the
+    original.
+
+  With `SwirlTexture` set, it uses a `ParticleEmitter` playing the uploaded flipbook instead.
+- The stars float up from a box around the body. They and the swirl are attached to the welded
+  part, so they stay with the player and fade out with the bubble.
 - The rim is a camera-facing `BillboardGui`. Each glow in it (inner light, outer haze, inner
   ring, rim, core) is a stack of faint, nested round `UIStroke` rings whose opacities add up
   to a smooth falloff, which gives the blurry gradient look without any images. The script
