@@ -23,10 +23,16 @@ local CONFIG = {
 	DiameterScale = 1.45, -- bubble diameter = character height * this
 	FallbackDiameter = 7, -- used when the character can't be measured
 
-	RimColor = Color3.fromRGB(95, 215, 255),
-	GlowColor = Color3.fromRGB(60, 190, 255),
-	HazeColor = Color3.fromRGB(0, 150, 255),
+	-- Rim colors, measured from 2014 footage: two thin cyan rings with near-white
+	-- cores and deep blue glow between and inside them.
+	RingColor = Color3.fromRGB(110, 200, 250),
+	RingCoreColor = Color3.fromRGB(200, 245, 255),
+	GlowColor = Color3.fromRGB(22, 112, 250),
+	HazeColor = Color3.fromRGB(50, 140, 225),
 	HighlightColor = Color3.fromRGB(225, 252, 255),
+	-- The 2014 glow added light, which Roblox UI can't do, so in daylight the blue
+	-- glows are lightened this much toward pale cyan to look the same.
+	DaylightLighten = 0.55,
 
 	-- The sparkles from today's ForceField: a glittery swirl spinning around the
 	-- waist and little stars floating up. The swirl is rebuilt from the
@@ -43,52 +49,85 @@ local CONFIG = {
 	ShowInsideTint = true, -- tint the screen while the camera is inside a bubble
 	InsideTintTransparency = 0.6,
 
-	HighlightFollowsSun = true, -- brightest side of the rim faces the sun
-	PulseSpeed = 2.6, -- how fast the inner ring breathes in and out
+	ShowFloorGlow = true, -- glowing ring where the bubble dips into the floor
 
-	FadeInTime = 0.25,
+	HighlightFollowsSun = true, -- brightest side of the rim faces the sun
+	PulseInterval = 0.65, -- seconds between the inner ring's quick flicks inward
+
+	FadeInTime = 0.5, -- starts as a thin white ring and turns blue, like 2014
 	FadeOutTime = 1,
 }
 
 -- How far the billboard reaches, in bubble radii. Leaves room for the outer glow.
 local CANVAS = 1.25
 
--- The rim is made of soft glows, listed back to front. Each glow is a stack of
--- faint nested rings whose opacities add up to a smooth falloff, so it keeps
--- the blurry look of the original even in HD. Distances are in bubble radii
--- (1 = the rim); a glow fades out about two spreads from its center.
+-- The rim is made of soft glows, listed back to front, fitted to the 2014
+-- footage's brightness at each distance from the center. Each glow is a stack of
+-- faint nested rings whose opacities add up to a smooth falloff, so it stays soft
+-- even in HD. Distances are in bubble radii (1 = the rim); a glow fades out about
+-- two spreads from its center. "soft" glows fade in after the rings, and
+-- lighten in daylight.
 local GLOWS = {
-	-- soft light inside the rim, fading toward the middle
-	{ center = 0.975, spreadIn = 0.11, spreadOut = 0, peak = 0.42, color = CONFIG.GlowColor, rings = 22 },
-	-- haze outside the rim
-	{ center = 0.98, spreadIn = 0, spreadOut = 0.07, peak = 0.4, color = CONFIG.HazeColor, rings = 18 },
-	-- the inner ring that drifts in and out
+	-- deep blue glow inside the inner ring, fading toward the middle
+	{ center = 0.895, spreadIn = 0.093, spreadOut = 0, peak = 0.65, color = CONFIG.GlowColor, rings = 16, soft = true },
+	-- deep blue between the two rings
 	{
-		center = 0.9,
-		spreadIn = 0.018,
-		spreadOut = 0.018,
-		peak = 0.5,
-		color = Color3.fromRGB(140, 225, 255),
-		rings = 8,
+		center = 0.938,
+		spreadIn = 0.046,
+		spreadOut = 0.046,
+		peak = 0.69,
+		color = CONFIG.GlowColor,
+		rings = 14,
+		soft = true,
+	},
+	-- faint haze outside the rim
+	{ center = 1, spreadIn = 0, spreadOut = 0.059, peak = 0.21, color = CONFIG.HazeColor, rings = 10, soft = true },
+	-- the inner ring and its core, which flick inward now and then
+	{
+		center = 0.895,
+		spreadIn = 0.0185,
+		spreadOut = 0.0185,
+		peak = 0.82,
+		color = CONFIG.RingColor,
+		rings = 10,
+		pulse = true,
+	},
+	{
+		center = 0.895,
+		spreadIn = 0.0083,
+		spreadOut = 0.0083,
+		peak = 0.48,
+		color = CONFIG.RingCoreColor,
+		rings = 6,
 		pulse = true,
 	},
 	-- the rim
-	{ center = 0.98, spreadIn = 0.03, spreadOut = 0.022, peak = 0.88, color = CONFIG.RimColor, rings = 14 },
+	{ center = 1, spreadIn = 0.0185, spreadOut = 0.0105, peak = 0.95, color = CONFIG.RingColor, rings = 10 },
 	-- its white-hot core, brightest on the side facing the sun
 	{
-		center = 0.98,
-		spreadIn = 0.011,
-		spreadOut = 0.009,
-		peak = 0.7,
+		center = 1,
+		spreadIn = 0.0083,
+		spreadOut = 0.0047,
+		peak = 0.86,
 		color = Color3.new(1, 1, 1),
-		rings = 8,
+		rings = 6,
 		highlight = true,
 	},
 }
+local DAYLIGHT_GLOW = Color3.fromRGB(150, 215, 255)
+local WHITE = Color3.new(1, 1, 1)
 
-local PULSE_SWING = 0.045 -- how far the pulsing ring moves, in bubble radii
+-- The inner ring rests at 0.895 of the radius and every PulseInterval seconds
+-- quickly flicks in to 0.84 and back, as in the 2014 footage.
+local PULSE_DEPTH = 0.055
+local PULSE_LENGTH = 0.2 -- share of the interval the flick takes
+
+-- The 2014 bubble sits a bit lower than the root part: its center is this far
+-- below it, as a share of the character's height.
+local CENTER_DROP = 0.09
+
 local FILL_RADIUS = 0.96
-local FILL_OPACITY = 0.16
+local FILL_OPACITY = 0.1
 
 -- The sparkles are laid out in studs for a 5 stud tall R6 character and
 -- scaled to fit the real bubble.
@@ -123,6 +162,17 @@ local SWIRL_FADE = NumberSequence.new({
 	NumberSequenceKeypoint.new(0.75, 0.3),
 	NumberSequenceKeypoint.new(1, 1),
 })
+
+-- Where the bubble dips into the floor, a glowing ring is drawn on the floor
+-- along the line where the two meet. Layers, from the soft glow inside the line
+-- to its bright core: { inset from the line, width (studs), color, opacity }.
+local FLOOR_LAYERS = {
+	{ 0.25, 0.5, CONFIG.GlowColor, 0.18 },
+	{ 0.12, 0.24, CONFIG.RingColor, 0.25 },
+	{ 0, 0.12, CONFIG.RingColor, 0.6 },
+	{ 0, 0.05, CONFIG.RingCoreColor, 0.8 },
+}
+local FLOOR_PIXELS_PER_STUD = 50
 
 -- The stars float up out of this box.
 local STAR_BOX = Vector3.new(4.4, 3.2, 4.4)
@@ -252,6 +302,7 @@ local function layoutSparkles(effect)
 	local scale = effect.diameter / BASE_DIAMETER
 	effect.scale = scale
 	effect.anchor.Size = STAR_BOX * scale
+	effect.weld.C0 = CFrame.new(0, -CENTER_DROP * effect.diameter / CONFIG.DiameterScale, 0)
 
 	if effect.swirlDisc then
 		local width = 2 * SWIRL_EXTENT * SWIRL_RADIUS * effect.diameter * CONFIG.SparkleSize
@@ -467,6 +518,83 @@ local function newSwirlDisc(anchor: BasePart)
 	}
 end
 
+local function newFloorGlow(anchor: BasePart, model: Model)
+	local part = newCarrier("FloorGlow")
+	part.Anchored = true
+
+	local gui = Instance.new("SurfaceGui")
+	gui.Face = Enum.NormalId.Top
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = FLOOR_PIXELS_PER_STUD
+	gui.LightInfluence = 0
+	gui.AlwaysOnTop = false
+	gui.MaxDistance = 250
+	gui.Adornee = part
+	gui.Parent = part
+
+	local root = Instance.new("Frame")
+	root.Size = UDim2.fromScale(1, 1)
+	root.BackgroundTransparency = 1
+	root.Visible = false
+	root.Parent = gui
+
+	local layers = {}
+	for _, spec in FLOOR_LAYERS do
+		local frame = Instance.new("Frame")
+		frame.AnchorPoint = Vector2.new(0.5, 0.5)
+		frame.Position = UDim2.fromScale(0.5, 0.5)
+		frame.BackgroundTransparency = 1
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0.5, 0)
+		corner.Parent = frame
+		local stroke = Instance.new("UIStroke")
+		stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		stroke.Color = spec[3]
+		stroke.Thickness = spec[2] * FLOOR_PIXELS_PER_STUD
+		stroke.Transparency = 1
+		stroke.Parent = frame
+		frame.Parent = root
+		table.insert(layers, { spec = spec, frame = frame, stroke = stroke })
+	end
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { model, folder }
+	params.IgnoreWater = true
+
+	part.Parent = anchor
+	return { part = part, root = root, layers = layers, params = params, drawnAlpha = -1 }
+end
+
+-- Finds the floor under the bubble and draws the ring where they meet.
+local function updateFloorGlow(effect, center: Vector3, radius: number, alpha: number)
+	local floor = effect.floor
+	local hit = if alpha > 0 then workspace:Raycast(center, Vector3.new(0, -radius, 0), floor.params) else nil
+	local reach = if hit then math.sqrt(math.max(radius * radius - hit.Distance * hit.Distance, 0)) else 0
+	floor.root.Visible = reach > 0.2
+	if not floor.root.Visible then
+		return
+	end
+
+	local normal = hit.Normal
+	local across = if math.abs(normal.X) < 0.9 then Vector3.xAxis else Vector3.zAxis
+	across = (across - normal * across:Dot(normal)).Unit
+	local width = 2 * (radius + 0.5)
+	floor.part.Size = Vector3.new(width, 0.05, width)
+	floor.part.CFrame = CFrame.fromMatrix(hit.Position + normal * 0.03, across, normal)
+	for _, layer in floor.layers do
+		local inset, thickness = layer.spec[1], layer.spec[2]
+		local size = math.max(2 * (reach - inset) - thickness, 0) / width
+		layer.frame.Size = UDim2.fromScale(size, size)
+	end
+	if alpha ~= floor.drawnAlpha then
+		floor.drawnAlpha = alpha
+		for _, layer in floor.layers do
+			layer.stroke.Transparency = 1 - layer.spec[4] * alpha
+		end
+	end
+end
+
 local function createEffect(forceField: ForceField, model: Model)
 	-- Invisible part that carries everything. It gets welded to the character,
 	-- so the bubble can't fall behind, even while it fades out.
@@ -548,8 +676,8 @@ local function createEffect(forceField: ForceField, model: Model)
 			if glow.highlight then
 				local gradient = Instance.new("UIGradient")
 				gradient.Color = ColorSequence.new({
-					ColorSequenceKeypoint.new(0, CONFIG.GlowColor),
-					ColorSequenceKeypoint.new(0.55, CONFIG.RimColor),
+					ColorSequenceKeypoint.new(0, CONFIG.RingColor),
+					ColorSequenceKeypoint.new(0.55, CONFIG.RingCoreColor),
 					ColorSequenceKeypoint.new(1, CONFIG.HighlightColor),
 				})
 				gradient.Transparency = NumberSequence.new({
@@ -586,6 +714,7 @@ local function createEffect(forceField: ForceField, model: Model)
 		scale = 1,
 		swirl = swirl,
 		swirlDisc = swirlDisc,
+		floor = if CONFIG.ShowFloorGlow then newFloorGlow(anchor, model) else nil,
 		stars = stars,
 		emitters = if swirl then { swirl, stars } else { stars },
 		billboard = billboard,
@@ -595,6 +724,7 @@ local function createEffect(forceField: ForceField, model: Model)
 		highlights = highlights,
 		pixelsPerRadius = 0, -- on-screen size the ring widths were last set for
 		drawnAlpha = -1, -- fade level the ring transparencies were last set for
+		drawnDaylight = -1, -- daylight the ring colors were last set for
 		connection = nil :: RBXScriptConnection?,
 	}
 	layoutSparkles(effect)
@@ -782,7 +912,14 @@ end
 
 -- Updates one bubble and returns how strongly it covers the camera (0 when
 -- the camera is outside it).
-local function updateEffect(effect, dt: number, now: number, camera: Camera, highlightRotation: number): number
+local function updateEffect(
+	effect,
+	dt: number,
+	now: number,
+	camera: Camera,
+	highlightRotation: number,
+	daylight: number
+): number
 	local root = effect.root
 	if root and not root:IsDescendantOf(effect.model) then
 		-- The part we were welded to is gone (respawn, streaming). Stay where we
@@ -818,10 +955,13 @@ local function updateEffect(effect, dt: number, now: number, camera: Camera, hig
 	end
 
 	local radius = effect.diameter / 2
-	local position = if root then root.Position else effect.anchor.Position
+	local position = effect.anchor.Position
 	local distance = (camera.CFrame.Position - position).Magnitude
 	if effect.swirlDisc then
 		updateSwirl(effect, dt, camera, alpha, CONFIG.ShowSparkles and alpha > 0 and distance > radius)
+	end
+	if effect.floor then
+		updateFloorGlow(effect, position, radius, alpha)
 	end
 	if distance <= radius or alpha <= 0 then
 		effect.canvas.Visible = false
@@ -849,22 +989,37 @@ local function updateEffect(effect, dt: number, now: number, camera: Camera, hig
 	end
 	local refade = alpha ~= effect.drawnAlpha
 	effect.drawnAlpha = alpha
-	local pulse = math.sin(now * CONFIG.PulseSpeed + effect.phase)
+	local recolor = refade or math.abs(daylight - effect.drawnDaylight) > 0.02
+	if recolor then
+		effect.drawnDaylight = daylight
+	end
+	-- Fading in, the rings start out white and the blue glows come in after them.
+	local whiteness = if effect.dying then 0 else (1 - alpha) ^ 2
+	local softAlpha = if effect.dying then alpha else alpha * alpha
+	local flick = (now / CONFIG.PulseInterval + effect.phase / (math.pi * 2)) % 1
+	local pulse = if flick < PULSE_LENGTH then -PULSE_DEPTH * math.sin(math.pi * flick / PULSE_LENGTH) else 0
 	local shimmer = 0.95 + 0.05 * math.sin(now * 6 + effect.phase)
 
-	effect.fill.BackgroundTransparency = 1 - FILL_OPACITY * alpha
+	effect.fill.BackgroundTransparency = 1 - FILL_OPACITY * softAlpha
 	for _, ring in effect.rings do
 		local glow = ring.glow
 		if glow.pulse then
-			local radius = glow.center + PULSE_SWING * pulse - ring.inner
+			local radius = glow.center + pulse - ring.inner
 			ring.frame.Size = UDim2.fromScale(radius / CANVAS, radius / CANVAS)
 		end
 		if resize then
 			ring.stroke.Thickness = (ring.inner + ring.outer) * pixelsPerRadius
 		end
 		if refade or glow.highlight then
-			local strength = if glow.highlight then alpha * shimmer else alpha
+			local strength = if glow.soft then softAlpha elseif glow.highlight then alpha * shimmer else alpha
 			ring.stroke.Transparency = 1 - ring.opacity * strength
+		end
+		if recolor then
+			local color = glow.color
+			if glow.soft then
+				color = color:Lerp(DAYLIGHT_GLOW, CONFIG.DaylightLighten * daylight)
+			end
+			ring.stroke.Color = color:Lerp(WHITE, whiteness)
 		end
 	end
 	for _, gradient in effect.highlights do
@@ -881,19 +1036,21 @@ local function onRenderStep(dt: number)
 	end
 	local now = os.clock()
 	local highlightRotation = getHighlightRotation(camera, now)
+	-- 0 at night, 1 once the sun is up
+	local daylight = math.clamp((Lighting:GetSunDirection().Y + 0.05) / 0.25, 0, 1)
 	local inside = 0
 
 	for forceField, effect in effects do
 		if not isWanted(forceField) or forceField.Parent ~= effect.model then
 			stop(forceField)
 		else
-			inside = math.max(inside, updateEffect(effect, dt, now, camera, highlightRotation))
+			inside = math.max(inside, updateEffect(effect, dt, now, camera, highlightRotation, daylight))
 		end
 	end
 
 	for index = #fading, 1, -1 do
 		local effect = fading[index]
-		inside = math.max(inside, updateEffect(effect, dt, now, camera, highlightRotation))
+		inside = math.max(inside, updateEffect(effect, dt, now, camera, highlightRotation, daylight))
 		if effect.alpha <= 0 then
 			effect.anchor:Destroy()
 			table.remove(fading, index)
